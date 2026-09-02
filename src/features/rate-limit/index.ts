@@ -5,21 +5,15 @@
  *   rateLimitSlice     : Slice (gate = per-user token bucket, skipForPrivileged)
  *   checkEdgeRateLimit : (env, key) => Promise<ConnectGuardResult>
  *
- * STUB — replace with the token bucket + edge limiter.
+ * Two limits with two different jobs: the edge one stops a connect flood before
+ * it reaches a Durable Object, the token bucket bounds what an accepted socket
+ * may then send. Internals (`token-bucket.ts`, `edge-limiter.ts`) stay private
+ * to the slice; only the three names above are imported from outside.
  */
-import type { Env } from "../../env";
 import type { Slice } from "../../shared/slice";
-import type { ConnectGuardResult } from "../../shared/ports";
-import { allow, type MessageGate } from "../../shared/pipeline";
+import { rateLimitGate } from "./gate";
 
-export async function checkEdgeRateLimit(_env: Env, _key: string): Promise<ConnectGuardResult> {
-  return { allowed: true };
-}
-
-export const rateLimitGate: MessageGate = {
-  name: "rate-limit",
-  skipForPrivileged: true,
-  check: () => allow(),
-};
+export { checkEdgeRateLimit } from "./edge-limiter";
+export { rateLimitGate };
 
 export const rateLimitSlice: Slice = { name: "rate-limit", gate: rateLimitGate };
