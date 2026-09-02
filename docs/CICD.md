@@ -175,7 +175,9 @@ Push na `main` — ou **Actions → Deploy → Run workflow**. A ordem dentro do
 5. **verificação** (`tools/ci/verify-deploy.mjs`) na URL publicada: o Worker
    responde, está no modo esperado, o cliente é servido, a porta de entrada de
    token se comporta como o modo pede, e um WebSocket conecta, envia e recebe o
-   ack e o fanout de volta pelos Durable Objects reais.
+   ack e o fanout de volta pelos Durable Objects reais. Ela repete por até cinco
+   tentativas: cada `wrangler secret put` publica uma versão nova, e enquanto o
+   rollout acontece uma requisição pode cair na versão anterior.
 
 `concurrency: deploy-production` garante que dois deploys nunca se atropelem.
 

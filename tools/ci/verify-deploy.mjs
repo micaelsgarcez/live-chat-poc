@@ -29,13 +29,23 @@ const room = arg("room", "ci-smoke");
 const expectedEnv = arg("expect-env", "production");
 const HEALTH_TIMEOUT_MS = 90_000;
 const WS_TIMEOUT_MS = 20_000;
+/**
+ * Cada `wrangler secret put` publica uma versão nova do Worker, então logo
+ * depois de um deploy as requisições caem em versões diferentes: uma emite o
+ * token e a seguinte ainda não conhece o secret. O primeiro uso de um Durable
+ * Object novo também pode responder 500 enquanto acorda. Nenhum dos dois é
+ * defeito do que foi publicado — é propagação, e um check pós-deploy tem que
+ * esperar por ela em vez de reprovar o deploy.
+ */
+const ATTEMPTS = 5;
+const ATTEMPT_DELAY_MS = 6000;
 
 if (!url) {
   process.stderr.write("verify-deploy: informe --url https://…\n");
   process.exit(2);
 }
 
-const checks = [];
+let checks = [];
 function record(name, ok, detail) {
   checks.push({ name, ok, detail });
   process.stdout.write(`${ok ? "  ✅" : "  ❌"} ${name}${detail ? ` — ${detail}` : ""}\n`);
@@ -117,9 +127,8 @@ function chatRoundtrip(token) {
   });
 }
 
-async function main() {
-  process.stdout.write(`verify-deploy: ${url}\n`);
-
+async function runChecks() {
+  checks = [];
   const health = await waitForHealth();
   record("o Worker responde /health", health?.ok === true, `environment=${health?.environment}`);
   record(
@@ -193,11 +202,16 @@ async function main() {
     record("a mensagem volta pelo fanout", trip.delivered, trip.error ?? "");
   }
 
+  return checks.every((check) => check.ok);
+}
+
+function summarise(attempts) {
   const failed = checks.filter((c) => !c.ok);
   const lines = [];
   lines.push(`## ${failed.length === 0 ? "✅" : "❌"} Verificação pós-deploy`);
   lines.push("");
   lines.push(`Alvo: ${url}`);
+  if (attempts > 1) lines.push(`Estabilizou na tentativa ${attempts} de ${ATTEMPTS}.`);
   lines.push("");
   lines.push("| | Verificação | Detalhe |");
   lines.push("|---|---|---|");
@@ -208,6 +222,21 @@ async function main() {
   const text = lines.join("\n");
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${text}\n`);
   return failed.length === 0;
+}
+
+async function main() {
+  process.stdout.write(`verify-deploy: ${url}\n`);
+  let attempt = 0;
+  let ok = false;
+  while (attempt < ATTEMPTS && !ok) {
+    attempt++;
+    if (attempt > 1) {
+      process.stdout.write(`\n  … ainda propagando; tentativa ${attempt} de ${ATTEMPTS}\n`);
+      await new Promise((resolve) => setTimeout(resolve, ATTEMPT_DELAY_MS));
+    }
+    ok = await runChecks();
+  }
+  return summarise(attempt);
 }
 
 main()
