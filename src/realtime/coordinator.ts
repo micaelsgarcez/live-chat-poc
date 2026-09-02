@@ -85,6 +85,8 @@ export class RoomCoordinator extends DurableObject<Env> implements CoordinatorAp
   private readonly recentDeletes = new Set<string>();
   /** Mirrors the stored alarm so the hot path never reads storage to check it. */
   private alarmAt: number | null = null;
+  /** Last room-wide presence pushed to the clients; -1 means never. */
+  private lastPresenceBroadcast = -1;
   private dirty = false;
   private readonly log = createLogger("coordinator", (this.env.LOG_LEVEL as LogLevel) ?? "info");
 
@@ -237,6 +239,7 @@ export class RoomCoordinator extends DurableObject<Env> implements CoordinatorAp
         this.log.info("expired silent shards", { shards: expired });
       }
       this.counters.connections = this.registry.connections();
+      await this.publishPresence();
       await this.maybeScale();
       if (this.dirty) await this.persistState();
       await this.refreshRanking();
@@ -246,6 +249,19 @@ export class RoomCoordinator extends DurableObject<Env> implements CoordinatorAp
       // An empty room stops ticking; `registerShard` starts it again.
       if (this.registry.size > 0) await this.scheduleAlarm(Date.now() + ALARM_INTERVAL_MS);
     }
+  }
+
+  /**
+   * The room total, not a shard's slice of it, is the number a viewer wants —
+   * so the coordinator is the only publisher of `presence`. Published from the
+   * alarm rather than from `reportPresence` so a shard is never blocked waiting
+   * on a fanout that reaches back into itself.
+   */
+  private async publishPresence(): Promise<void> {
+    const count = this.counters.connections;
+    if (count === this.lastPresenceBroadcast) return;
+    this.lastPresenceBroadcast = count;
+    await this.fanout([{ t: "presence", count }]);
   }
 
   /** Ranking is a nice-to-have refresh; it must never cost us the alarm. */

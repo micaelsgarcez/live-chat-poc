@@ -1,11 +1,12 @@
 /**
- * Presence throttling.
+ * Presence reporting.
  *
- * A shard that fans the same number out to every socket on every alarm tick is
- * paying for nothing: the clients already show it. The count therefore only
- * reaches the sockets when it actually moved, while the coordinator is also
- * refreshed on a slow heartbeat so its room total cannot silently go stale
- * after a shard stops changing.
+ * A shard only knows how many sockets *it* holds, and that is not the number a
+ * viewer wants to see — the room total is. So the shard reports its count to
+ * the coordinator, which owns the sum and is the single publisher of the
+ * `presence` event. Reporting is throttled: it goes out when the count actually
+ * moved, plus a slow heartbeat so the coordinator's copy cannot silently go
+ * stale after a shard stops changing.
  */
 
 export interface PresenceSnapshot {
@@ -16,8 +17,6 @@ export interface PresenceSnapshot {
 export interface PresenceDecision {
   /** Push the count to the coordinator. */
   report: boolean;
-  /** Fan a `presence` event out to this shard's sockets. */
-  fanout: boolean;
 }
 
 export function decidePresence(
@@ -26,7 +25,7 @@ export function decidePresence(
   now: number,
   maxSilenceMs: number,
 ): PresenceDecision {
-  if (!last) return { report: true, fanout: true };
+  if (!last) return { report: true };
   const changed = last.count !== count;
-  return { report: changed || now - last.at >= maxSilenceMs, fanout: changed };
+  return { report: changed || now - last.at >= maxSilenceMs };
 }

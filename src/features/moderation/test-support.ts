@@ -5,16 +5,15 @@
 import type { ModerationJob } from "../../shared/ports";
 import { defaultRoomConfig, type ModerationConfig, type RoomConfig } from "../../shared/room-config";
 import { newUserGateState, type GateContext } from "../../shared/pipeline";
-import schema from "../../../migrations/0001_init.sql?raw";
-
-/** The pool gives each test file an empty D1; apply the real migration to it. */
+/**
+ * `tests/apply-migrations.ts` already applied `migrations/` to this worker's D1,
+ * so this only clears the rows the slice's tests write.
+ */
 export async function applyLocalSchema(db: D1Database): Promise<void> {
-  const statements = schema
-    .replace(/--[^\n]*/g, "")
-    .split(";")
-    .map((statement) => statement.trim())
-    .filter((statement) => statement.length > 0);
-  for (const statement of statements) await db.prepare(statement).run();
+  await db.batch([
+    db.prepare("DELETE FROM moderation_actions"),
+    db.prepare("DELETE FROM messages"),
+  ]);
 }
 
 export function testConfig(

@@ -568,10 +568,11 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
   private async refreshPresence(count: number, now: number): Promise<void> {
     if (!this.roomId) return;
     const decision = decidePresence(count, this.lastPresence, now, PRESENCE_MAX_SILENCE_MS);
-    if (!decision.report && !decision.fanout) return;
+    if (!decision.report) return;
     try {
-      if (decision.report) await this.coordinator().reportPresence(this.shardIndex, count);
-      if (decision.fanout) await this.fanout([{ t: "presence", count }]);
+      // Only the coordinator publishes `presence`: this shard's socket count is
+      // a fraction of the room and would be the wrong number to show anyone.
+      await this.coordinator().reportPresence(this.shardIndex, count);
       this.lastPresence = { count, at: now };
     } catch (error) {
       this.log.warn("presence report failed", { error: String(error), shard: this.shardIndex });

@@ -388,7 +388,7 @@ function printReport(report) {
   lines.push(`  ${pad("elapsed", 16)} ${report.elapsedSeconds}s`);
   lines.push("");
   lines.push(
-    `  ${pad("connections", 16)} ${report.connections.opened}/${report.connections.requested} opened, ${report.connections.failed} failed, ${report.connections.connecting} still handshaking, ${report.connections.openNow} open at the end (peak presence per shard ${report.connections.presenceMax})`,
+    `  ${pad("connections", 16)} ${report.connections.opened}/${report.connections.requested} opened, ${report.connections.failed} failed, ${report.connections.connecting} still handshaking, ${report.connections.openNow} open at the end (peak presence ${report.connections.presenceMax})`,
   );
   lines.push(
     `  ${pad("messages", 16)} ${report.messages.sent} sent, ${report.messages.acked} acked, ${report.messages.rejected} rejected, ${report.messages.inflight} unanswered`,
