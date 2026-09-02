@@ -1,0 +1,138 @@
+# Deploy contínuo: todo push na main que passar no CI vai para produção na
+# Cloudflare, com as migrations aplicadas antes e uma verificação na URL
+# publicada depois. Os ids de recurso e os secrets vêm da configuração do
+# repositório — veja docs/CICD.md.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # Deploys nunca se atropelam, e nenhum é cancelado no meio.
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: Deploy na Cloudflare
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.url }}
+    env:
+      WRANGLER_SEND_METRICS: "false"
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      JWT_HS256_SECRET: ${{ secrets.JWT_HS256_SECRET }}
+      MODERATOR_API_KEY: ${{ secrets.MODERATOR_API_KEY }}
+      CF_ENVIRONMENT: ${{ vars.CF_ENVIRONMENT }}
+      CF_WORKER_NAME: ${{ vars.CF_WORKER_NAME }}
+      CF_KV_ID: ${{ vars.CF_KV_ID }}
+      CF_D1_DATABASE_ID: ${{ vars.CF_D1_DATABASE_ID }}
+      CF_D1_DATABASE_NAME: ${{ vars.CF_D1_DATABASE_NAME }}
+      CF_CUSTOM_DOMAIN: ${{ vars.CF_CUSTOM_DOMAIN }}
+      CF_RATE_LIMIT_NAMESPACE_ID: ${{ vars.CF_RATE_LIMIT_NAMESPACE_ID }}
+      JWT_ISSUER: ${{ vars.JWT_ISSUER }}
+      JWT_AUDIENCE: ${{ vars.JWT_AUDIENCE }}
+      JWT_ALG: ${{ vars.JWT_ALG }}
+      JWKS_URL: ${{ vars.JWKS_URL }}
+      DEFAULT_SHARD_COUNT: ${{ vars.DEFAULT_SHARD_COUNT }}
+      MAX_SOCKETS_PER_SHARD: ${{ vars.MAX_SOCKETS_PER_SHARD }}
+      LOG_LEVEL: ${{ vars.LOG_LEVEL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Falhar aqui, com a lista do que falta, é muito melhor do que falhar no
+      # meio de um `wrangler deploy` com uma mensagem de credencial.
+      - name: Conferir a configuração do pipeline
+        run: |
+          missing=""
+          for name in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
+            eval "value=\${$name}"
+            if [ -z "$value" ]; then missing="$missing\n  - secret $name"; fi
+          done
+          for name in CF_KV_ID CF_D1_DATABASE_ID; do
+            eval "value=\${$name}"
+            if [ -z "$value" ]; then missing="$missing\n  - variable $name"; fi
+          done
+          if [ -n "$missing" ]; then
+            printf 'Faltam configurações para o deploy:%b\n\nVeja docs/CICD.md.\n' "$missing"
+            exit 1
+          fi
+          echo "Configuração completa."
+
+      - name: Gerar a config de produção
+        run: node tools/ci/render-wrangler-config.mjs
+
+      # Antes do código: as migrations são aditivas, então o schema novo é
+      # compatível com a versão que ainda está no ar.
+      - name: Aplicar as migrations no D1 remoto
+        run: npx wrangler d1 migrations apply CHAT_DB --remote --config wrangler.deploy.json
+
+      - name: Deploy
+        id: deploy
+        run: |
+          set -o pipefail
+          mkdir -p .ci
+          npx wrangler deploy --config wrangler.deploy.json 2>&1 | tee .ci/deploy.log
+          url="${CF_CUSTOM_DOMAIN:+https://$CF_CUSTOM_DOMAIN}"
+          if [ -z "$url" ]; then
+            url=$(grep -oE 'https://[A-Za-z0-9.-]+\.workers\.dev' .ci/deploy.log | head -1)
+          fi
+          if [ -z "$url" ]; then
+            echo "Não consegui descobrir a URL publicada a partir da saída do wrangler." >&2
+            exit 1
+          fi
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "Publicado em $url"
+
+      # Secrets não fazem parte do bundle: são gravados no Worker depois do
+      # deploy e passam a valer na hora, sem nova publicação.
+      - name: Sincronizar os secrets do Worker
+        run: |
+          set -e
+          if [ -n "$JWT_HS256_SECRET" ]; then
+            printf '%s' "$JWT_HS256_SECRET" | npx wrangler secret put JWT_HS256_SECRET --config wrangler.deploy.json
+          else
+            echo "JWT_HS256_SECRET não configurado — tokens HS256 não serão aceitos."
+          fi
+          if [ -n "$MODERATOR_API_KEY" ]; then
+            printf '%s' "$MODERATOR_API_KEY" | npx wrangler secret put MODERATOR_API_KEY --config wrangler.deploy.json
+          else
+            echo "MODERATOR_API_KEY não configurado — só JWT com papel de moderador vai passar."
+          fi
+
+      - name: Verificar a URL publicada
+        run: |
+          node tools/ci/verify-deploy.mjs \
+            --url "${{ steps.deploy.outputs.url }}" \
+            --expect-env "${CF_ENVIRONMENT:-demo}"
+
+      - name: Resumo
+        if: always()
+        run: |
+          {
+            echo "## 🚀 Deploy"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| URL | ${{ steps.deploy.outputs.url }} |"
+            echo "| Worker | ${CF_WORKER_NAME:-live-chat} |"
+            echo "| Modo | \`${CF_ENVIRONMENT:-demo}\` |"
+            echo "| Commit | \`${GITHUB_SHA:0:7}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

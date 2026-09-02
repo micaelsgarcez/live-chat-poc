@@ -78,6 +78,30 @@ coordinator) recalcula o ranking para o KV.
 Moderador: header `x-moderator-key` (veja `.dev.vars`) ou um JWT com papel
 `moderator`/`admin`.
 
+## CI/CD
+
+`.github/workflows/ci.yml` roda em toda PR e todo push: typecheck, a suíte
+inteira no workerd com o resultado agrupado **por funcionalidade**, o build do
+Worker e um smoke funcional contra um `wrangler dev` de verdade — nada disso
+precisa de conta na Cloudflare.
+
+`.github/workflows/deploy.yml` publica todo push na `main` que passar no CI:
+migrations no D1 remoto, `wrangler deploy`, secrets sincronizados e uma
+verificação na URL publicada que abre um WebSocket e confere o ack.
+
+A config de deploy é **gerada** a partir do `wrangler.jsonc` (que é um contrato
+congelado e descreve o mundo local), então os ids da conta ficam na configuração
+do repositório e não no git.
+
+O deploy sai como `ENVIRONMENT=demo`: a rota que emite token continua ligada, de
+modo que qualquer visitante entra na sala `demo`, escreve e pode se declarar
+moderador para experimentar apagar, silenciar e banir. É de propósito — as
+regras só se mostram para quem consegue tentar quebrá-las. `CF_ENVIRONMENT=production`
+desliga essa rota quando existir um emissor de tokens de verdade.
+
+O passo a passo — provisionamento, secrets e variables — está em
+[`docs/CICD.md`](docs/CICD.md).
+
 ## Estrutura
 
 ```
@@ -85,8 +109,9 @@ src/shared/      contratos congelados (protocolo, pipeline, ports, config)
 src/features/    uma pasta por fatia: rotas + domínio + testes
 src/realtime/    ChatShard e RoomCoordinator
 tests/           testes que atravessam fatias + TestClient de WebSocket
-tools/           gerador de carga e seeder locais
+tools/           gerador de carga, seeder e as ferramentas do pipeline (tools/ci/)
 migrations/      schema do D1
+.github/         CI e deploy contínuo
 ```
 
 Regra de dependência: uma fatia importa `src/shared/*` e o `index.ts` público de

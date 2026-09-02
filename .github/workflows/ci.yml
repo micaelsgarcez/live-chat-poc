@@ -1,0 +1,98 @@
+# Validação do projeto: os testes por funcionalidade, o build do Worker e um
+# smoke funcional contra um `wrangler dev` de verdade. Nada aqui precisa de
+# conta na Cloudflare — é o mesmo que roda na máquina de quem desenvolve.
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+  # A `main` não aparece aqui de propósito: o workflow de deploy chama este
+  # como gate, então um push na main rodaria a validação duas vezes.
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Numa PR só o último push interessa; num deploy, cancelar o CI cancelaria o
+  # deploy que depende dele.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  WRANGLER_SEND_METRICS: "false"
+
+jobs:
+  validate:
+    name: Typecheck + testes por funcionalidade
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Testes no runtime real do workerd
+        run: |
+          mkdir -p .ci
+          npx vitest run --reporter=default --reporter=json --outputFile.json=.ci/vitest-results.json
+
+      - name: Relatório por funcionalidade
+        if: always()
+        run: node tools/ci/summarize-tests.mjs
+
+      - name: Guardar o resultado bruto
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vitest-results
+          path: .ci/vitest-results.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  build:
+    name: Build do Worker e da config de deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Compila o bundle e valida os bindings sem tocar em nenhuma conta.
+      - name: Build local (wrangler.jsonc)
+        run: npx wrangler deploy --dry-run --outdir .ci/dist
+
+      # A config de produção é gerada; um erro no gerador só apareceria na hora
+      # do deploy se não fosse validado aqui, com ids de mentira.
+      - name: Build de produção (config renderizada)
+        run: |
+          node tools/ci/render-wrangler-config.mjs --placeholders
+          npx wrangler deploy --dry-run --config wrangler.deploy.json --outdir .ci/dist-prod
+
+  smoke:
+    name: Smoke funcional (wrangler dev)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Subir o dev server e percorrer o produto
+        run: node tools/ci/smoke.mjs --port 8788
