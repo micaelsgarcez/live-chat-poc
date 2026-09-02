@@ -1,4 +1,182 @@
 <!doctype html>
-<meta charset="utf-8" />
-<title>live-chat — demo client (placeholder)</title>
-<p>Placeholder. The demo client slice replaces this file.</p>
+<html lang="en" data-theme="auto">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>live-chat — demo client</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>💬</text></svg>"
+    />
+    <script type="module" src="./app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <h1>live-chat</h1>
+        <small>demo client</small>
+      </div>
+      <div class="grow"></div>
+      <p id="conn-status" class="status" role="status" data-state="offline">disconnected</p>
+      <button id="theme-toggle" type="button" aria-label="Colour theme: follow system">
+        theme: auto
+      </button>
+    </header>
+
+    <div class="app">
+      <!-- ---------------------------------------------------------- -->
+      <!-- left column: join + session facts                          -->
+      <!-- ---------------------------------------------------------- -->
+      <div class="column">
+        <section class="card" aria-labelledby="join-title">
+          <h2 id="join-title">Join a room</h2>
+          <form id="join-form">
+            <div class="field">
+              <label for="room-input">Room</label>
+              <input id="room-input" name="room" type="text" value="demo" autocomplete="off"
+                required maxlength="64" />
+            </div>
+            <div class="field">
+              <label for="name-input">Nickname</label>
+              <input id="name-input" name="name" type="text" autocomplete="off" required
+                maxlength="40" placeholder="ada" />
+            </div>
+            <div class="checkbox">
+              <input id="mod-input" name="moderator" type="checkbox" />
+              <label for="mod-input">Join with the <code>moderator</code> role</label>
+            </div>
+            <div class="row">
+              <button id="connect-btn" class="primary" type="submit">Connect</button>
+              <button id="disconnect-btn" type="button" disabled>Disconnect</button>
+            </div>
+          </form>
+          <p id="join-hint" class="hint">
+            A dev token is minted through <code>POST /api/dev/token</code>.
+          </p>
+        </section>
+
+        <section class="card" aria-labelledby="session-title">
+          <h2 id="session-title">Session</h2>
+          <dl class="facts">
+            <dt>User</dt>
+            <dd id="fact-user">—</dd>
+            <dt>Roles</dt>
+            <dd id="fact-roles">—</dd>
+            <dt>Shard</dt>
+            <dd id="fact-shard">—</dd>
+            <dt>Online (shard)</dt>
+            <dd id="fact-presence">—</dd>
+            <dt>Slow mode</dt>
+            <dd id="fact-slowmode">—</dd>
+            <dt>Max length</dt>
+            <dd id="fact-maxlen">—</dd>
+            <dt>Config v.</dt>
+            <dd id="fact-configversion">—</dd>
+            <dt>Ping</dt>
+            <dd id="fact-ping">—</dd>
+          </dl>
+        </section>
+      </div>
+
+      <!-- ---------------------------------------------------------- -->
+      <!-- centre column: the chat itself                             -->
+      <!-- ---------------------------------------------------------- -->
+      <div class="column column-chat">
+        <section class="card chat" aria-labelledby="chat-title">
+          <div class="chat-head">
+            <h2 id="chat-title">Messages</h2>
+            <div class="grow"></div>
+            <span id="room-badge" class="badge">no room</span>
+            <span id="slowmode-badge" class="badge" data-tone="warn" hidden>slow mode</span>
+            <span id="closed-badge" class="badge" data-tone="warn" hidden>room closed</span>
+          </div>
+
+          <ul
+            id="messages"
+            class="messages"
+            role="log"
+            aria-live="polite"
+            aria-relevant="additions text"
+            aria-label="Chat messages"
+          >
+            <li class="empty" id="messages-empty">Not connected yet.</li>
+          </ul>
+
+          <form id="composer" class="composer">
+            <div class="field">
+              <label class="visually-hidden" for="body-input">Message</label>
+              <textarea id="body-input" name="body" rows="1" autocomplete="off"
+                placeholder="Say something… (Enter sends, Shift+Enter for a new line)"
+                disabled></textarea>
+            </div>
+            <div class="field">
+              <label class="visually-hidden" for="emoji-select">Reaction emoji</label>
+              <select id="emoji-select" name="emoji">
+                <option value="👍">👍</option>
+                <option value="❤️">❤️</option>
+                <option value="😂">😂</option>
+                <option value="🔥">🔥</option>
+                <option value="🎉">🎉</option>
+              </select>
+            </div>
+            <button id="send-btn" class="primary" type="submit" disabled>Send</button>
+          </form>
+        </section>
+      </div>
+
+      <!-- ---------------------------------------------------------- -->
+      <!-- right column: ranking + moderator tools                    -->
+      <!-- ---------------------------------------------------------- -->
+      <div class="column">
+        <section class="card" aria-labelledby="ranking-title">
+          <h2 id="ranking-title">Ranking</h2>
+          <ol id="ranking-list" class="ranking" aria-live="polite"></ol>
+          <p id="ranking-hint" class="hint">Connect to load the ranking.</p>
+          <p class="hint">
+            <button id="ranking-refresh" type="button" disabled>Refresh ranking</button>
+          </p>
+        </section>
+
+        <section class="card" id="mod-panel" aria-labelledby="mod-title" hidden>
+          <h2 id="mod-title">Moderator</h2>
+
+          <div class="field">
+            <label for="slowmode-input">Slow mode (seconds)</label>
+            <input id="slowmode-input" type="number" min="0" max="300" step="1" value="0" />
+          </div>
+          <div class="checkbox">
+            <input id="closed-input" type="checkbox" />
+            <label for="closed-input">Close the room</label>
+          </div>
+          <div class="row">
+            <button id="config-apply" type="button">Apply configuration</button>
+          </div>
+
+          <div class="field" style="margin-top: 14px">
+            <label for="ban-user-input">Ban user id</label>
+            <input id="ban-user-input" type="text" autocomplete="off" placeholder="user-42" />
+          </div>
+          <div class="field">
+            <label for="ban-reason-input">Ban reason</label>
+            <input id="ban-reason-input" type="text" autocomplete="off" placeholder="spam" />
+          </div>
+          <div class="row">
+            <button id="ban-apply" type="button">Ban</button>
+          </div>
+
+          <div class="field" style="margin-top: 14px">
+            <label for="delete-id-input">Delete message id</label>
+            <input id="delete-id-input" type="text" autocomplete="off" placeholder="msg id" />
+          </div>
+          <div class="row">
+            <button id="delete-apply" type="button">Delete message</button>
+          </div>
+
+          <p id="mod-hint" class="hint" role="status"></p>
+        </section>
+      </div>
+    </div>
+  </body>
+</html>
