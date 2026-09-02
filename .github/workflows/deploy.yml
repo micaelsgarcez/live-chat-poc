@@ -33,6 +33,11 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       JWT_HS256_SECRET: ${{ secrets.JWT_HS256_SECRET }}
       MODERATOR_API_KEY: ${{ secrets.MODERATOR_API_KEY }}
+      # Token separado e mínimo (Account -> Account Analytics -> Read). NÃO é o
+      # CLOUDFLARE_API_TOKEN do deploy: aquele pode editar Workers, e gravá-lo
+      # como secret de runtime poria um token capaz de republicar o Worker
+      # dentro do próprio Worker.
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       CF_ENVIRONMENT: ${{ vars.CF_ENVIRONMENT }}
       CF_WORKER_NAME: ${{ vars.CF_WORKER_NAME }}
       CF_KV_ID: ${{ vars.CF_KV_ID }}
@@ -40,6 +45,9 @@ jobs:
       CF_D1_DATABASE_NAME: ${{ vars.CF_D1_DATABASE_NAME }}
       CF_CUSTOM_DOMAIN: ${{ vars.CF_CUSTOM_DOMAIN }}
       CF_RATE_LIMIT_NAMESPACE_ID: ${{ vars.CF_RATE_LIMIT_NAMESPACE_ID }}
+      # Opcional: só para ler os analytics de uma conta diferente daquela em que
+      # o Worker é publicado. Vazio significa "a conta deste deploy".
+      CF_ACCOUNT_ID: ${{ vars.CF_ACCOUNT_ID }}
       JWT_ISSUER: ${{ vars.JWT_ISSUER }}
       JWT_AUDIENCE: ${{ vars.JWT_AUDIENCE }}
       JWT_ALG: ${{ vars.JWT_ALG }}
@@ -115,6 +123,11 @@ jobs:
             printf '%s' "$MODERATOR_API_KEY" | npx wrangler secret put MODERATOR_API_KEY --config wrangler.deploy.json
           else
             echo "MODERATOR_API_KEY não configurado — só JWT com papel de moderador vai passar."
+          fi
+          if [ -n "$CF_API_TOKEN" ]; then
+            printf '%s' "$CF_API_TOKEN" | npx wrangler secret put CF_API_TOKEN --config wrangler.deploy.json
+          else
+            echo "CF_API_TOKEN não configurado — o card de analytics da conta dirá 'somente local'; o resto do painel não depende dele."
           fi
 
       - name: Verificar a URL publicada

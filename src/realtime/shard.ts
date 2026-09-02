@@ -55,6 +55,7 @@ import { defaultRoomConfig, toPublicConfig, type RoomConfig } from "../shared/ro
 import { gates } from "../features/registry";
 import { createMessageBuffer, listRoomMessages } from "../features/persistence";
 import { enqueueModeration } from "../features/moderation";
+import { AuditRing, type AuditInput, type ShardObservabilityReport } from "../features/observability";
 import { decidePresence, type PresenceSnapshot } from "./shard/presence";
 import { RecentMessages, RECENT_MESSAGE_WINDOW } from "./shard/recent-messages";
 import {
@@ -101,6 +102,12 @@ const STORAGE_BATCH = 128;
 const USER_STATE_TTL_MS = 10 * 60_000;
 const USER_STATE_PRUNE_INTERVAL_MS = 60_000;
 const USER_STATE_SCAN_LIMIT = 2_000;
+/**
+ * Bucket width for the inbound-rate window. Two buckets rotate, so what the
+ * shard reports covers between one and two of these — enough to smooth a burst
+ * without letting a bad minute from an hour ago describe the present.
+ */
+const RATE_WINDOW_MS = 10_000;
 /** Cap on retained snapshots; the oldest disconnected users lose theirs first. */
 const MAX_PERSISTED_USERS = 5_000;
 /** Give up on handing the slot back rather than keep an empty shard awake. */
@@ -118,6 +125,16 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
   private readonly dirtyUsers = new Set<string>();
   private acceptedCount = 0;
   private rejectedCount = 0;
+  /*
+   * Lifetime counters answer "how much has this shard ever done"; the health
+   * verdict needs "what is happening now", and the two are different questions.
+   * A rotating pair of buckets gives the second one without storing a history.
+   */
+  private windowStartedAt = 0;
+  private windowAccepted = 0;
+  private windowRejected = 0;
+  private previousAccepted = 0;
+  private previousRejected = 0;
   private countersDirty = false;
   private registered = false;
   /** Mirrors the scheduled alarm so the hot path never reads storage for it. */
@@ -126,6 +143,16 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
   private nextPruneAt = 0;
   private unregisterAttempts = 0;
   private lastPresence: PresenceSnapshot | null = null;
+  /**
+   * Every decision this shard takes, for whoever is watching the console. In
+   * memory only and deliberately so: the alternative is a write on the reject
+   * path, which is the one path a flood makes hot.
+   */
+  private readonly audit = new AuditRing();
+  private lastFlushAt = 0;
+  private lastFlushCount = 0;
+  /** Isolate start, not shard birth: this is how hibernation becomes visible. */
+  private readonly startedAt = Date.now();
   private readonly log = createLogger("shard", (this.env.LOG_LEVEL as LogLevel) ?? "info");
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -170,6 +197,11 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
       const [client, server] = [pair[0], pair[1]];
       this.ctx.acceptWebSocket(server, [meta.identity.userId]);
       server.serializeAttachment(meta satisfies SocketAttachment);
+      this.recordAudit({
+        kind: "connect",
+        userId: meta.identity.userId,
+        name: meta.identity.name,
+      });
 
       this.send(server, {
         t: "hello",
@@ -206,6 +238,7 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
       const meta = ws.deserializeAttachment() as SocketAttachment | null;
       if (meta) {
         const userId = meta.identity.userId;
+        this.recordAudit({ kind: "disconnect", userId, name: meta.identity.name });
         const others = this.ctx.getWebSockets(userId).filter((socket) => socket !== ws);
         if (others.length === 0) {
           // Persist before dropping: reconnecting must not reset the bucket or
@@ -297,15 +330,29 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
           outcome.decision.code,
           outcome.decision.reason,
           outcome.decision.retryAfterMs,
+          { userId: meta.identity.userId, name: meta.identity.name, gate: outcome.gate },
         );
         return;
       }
-      shadowed = outcome.decision.kind === "shadow";
+      if (outcome.decision.kind === "shadow") {
+        shadowed = true;
+        this.recordAudit({
+          kind: "shadow",
+          userId: meta.identity.userId,
+          name: meta.identity.name,
+          gate: outcome.gate,
+          reason: outcome.decision.reason,
+        });
+      }
       body = outcome.body;
     } catch (error) {
       // A gate that throws must not look like an accepted message.
       this.log.error("pipeline failed", { error: String(error), room: meta.roomId });
-      this.rejectFrame(ws, parsed.cid, RejectCode.INTERNAL, "could not process the message");
+      this.rejectFrame(ws, parsed.cid, RejectCode.INTERNAL, "could not process the message", undefined, {
+        userId: meta.identity.userId,
+        name: meta.identity.name,
+        gate: "pipeline",
+      });
       return;
     }
 
@@ -329,7 +376,11 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
         await this.coordinator().publish({ message, originShardIndex: meta.shardIndex });
       } catch (error) {
         this.log.error("publish failed", { error: String(error), room: meta.roomId });
-        this.rejectFrame(ws, parsed.cid, RejectCode.INTERNAL, "could not deliver the message");
+        this.rejectFrame(ws, parsed.cid, RejectCode.INTERNAL, "could not deliver the message", undefined, {
+          userId: meta.identity.userId,
+          name: meta.identity.name,
+          gate: "publish",
+        });
         return;
       }
     }
@@ -337,6 +388,8 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
     state.lastAcceptedAt = now;
     state.acceptedCount++;
     this.acceptedCount++;
+    this.rollRateWindow(now);
+    this.windowAccepted++;
     this.countersDirty = true;
     this.markUserDirty(meta.identity.userId, now);
     this.send(ws, { t: "ack", cid: parsed.cid, id: message.id, ts: now });
@@ -377,7 +430,11 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
   ): Promise<void> {
     const privileged = hasRole(meta.identity, config.privilegedRoles);
     if (config.closed && !privileged) {
-      this.rejectFrame(ws, parsed.cid, RejectCode.ROOM_CLOSED, "the room is closed");
+      this.rejectFrame(ws, parsed.cid, RejectCode.ROOM_CLOSED, "the room is closed", undefined, {
+        userId: meta.identity.userId,
+        name: meta.identity.name,
+        gate: "react",
+      });
       return;
     }
     // Only warm state is consulted: a reaction is not worth a storage read on
@@ -391,6 +448,7 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
         RejectCode.MUTED,
         "you are temporarily muted",
         state.mutedUntil - now,
+        { userId: meta.identity.userId, name: meta.identity.name, gate: "react" },
       );
       return;
     }
@@ -413,7 +471,11 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
       ]);
     } catch (error) {
       this.log.error("reaction broadcast failed", { error: String(error) });
-      this.rejectFrame(ws, parsed.cid, RejectCode.INTERNAL, "could not deliver the reaction");
+      this.rejectFrame(ws, parsed.cid, RejectCode.INTERNAL, "could not deliver the reaction", undefined, {
+        userId: meta.identity.userId,
+        name: meta.identity.name,
+        gate: "react",
+      });
       return;
     }
 
@@ -445,7 +507,17 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
     if (events.length === 0) return 0;
     for (const event of events) {
       if (event.t === "msg") this.recent.remember(event.m);
-      else if (event.t === "delete") this.recent.forget(event.ids);
+      else if (event.t === "delete") {
+        this.recent.forget(event.ids);
+        // Every delete reaches every shard through here — a moderator's and the
+        // async consumer's alike — so this is the one place that sees them all.
+        this.recordAudit({
+          kind: "delete",
+          userId: "system",
+          reason: event.reason,
+          count: event.ids.length,
+        });
+      }
     }
     let payloads: string[];
     try {
@@ -483,6 +555,7 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
   async kickUsers(userIds: string[], reason: string): Promise<number> {
     let closed = 0;
     for (const userId of userIds) {
+      this.recordAudit({ kind: "kick", userId, reason });
       for (const socket of this.ctx.getWebSockets(userId)) {
         try {
           socket.send(encode({ t: "sys", code: "banned", reason }));
@@ -517,6 +590,7 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
         await this.ctx.storage.put(userStateKey(userId), snapshotUserState(state, now));
         if (connected.length > 0) this.userState.set(userId, state);
         muted++;
+        this.recordAudit({ kind: "mute", userId, reason, count: connected.length });
         for (const socket of connected) {
           try {
             socket.send(encode({ t: "sys", code: "muted", reason }));
@@ -550,6 +624,69 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
 
   async flushNow(): Promise<number> {
     return this.flushBuffer();
+  }
+
+  /**
+   * The observability console's fan-in target. Not on `ShardApi` — that port is
+   * a frozen contract and describes what the *coordinator* needs; this is read
+   * by the edge, and `env.CHAT_SHARD` is typed by the class, so the RPC stays
+   * fully typed without touching `src/shared`.
+   *
+   * `since` is this shard's own sequence, so a poll costs one round trip and
+   * carries only what the caller has not seen.
+   */
+  async getObservability(since: number): Promise<ShardObservabilityReport> {
+    return {
+      shardIndex: this.shardIndex,
+      roomId: this.roomId,
+      registered: this.registered,
+      connections: this.ctx.getWebSockets().length,
+      acceptedCount: this.acceptedCount,
+      rejectedCount: this.rejectedCount,
+      bufferedMessages: this.buffer?.size() ?? 0,
+      configVersion: this.config?.version ?? 0,
+      lastFlushAt: this.lastFlushAt,
+      lastFlushCount: this.lastFlushCount,
+      uptimeMs: Date.now() - this.startedAt,
+      // Rolled on read too, so a shard that went quiet reports a window that
+      // has aged out rather than the last burst it happened to see.
+      ...this.recentRates(Date.now()),
+      audit: this.audit.since(Number.isFinite(since) && since > 0 ? since : 0),
+    };
+  }
+
+  /** Retires the current bucket once it is older than `RATE_WINDOW_MS`. */
+  private rollRateWindow(now: number): void {
+    if (now - this.windowStartedAt < RATE_WINDOW_MS) return;
+    // More than two windows of silence means the previous bucket is stale too.
+    const carry = now - this.windowStartedAt < RATE_WINDOW_MS * 2;
+    this.previousAccepted = carry ? this.windowAccepted : 0;
+    this.previousRejected = carry ? this.windowRejected : 0;
+    this.windowAccepted = 0;
+    this.windowRejected = 0;
+    this.windowStartedAt = now;
+  }
+
+  private recentRates(now: number): {
+    recentAccepted: number;
+    recentRejected: number;
+    recentWindowMs: number;
+  } {
+    this.rollRateWindow(now);
+    return {
+      recentAccepted: this.windowAccepted + this.previousAccepted,
+      recentRejected: this.windowRejected + this.previousRejected,
+      recentWindowMs: RATE_WINDOW_MS * 2,
+    };
+  }
+
+  /** Never throws and never awaits: observing must not be able to break the room. */
+  private recordAudit(input: AuditInput): void {
+    try {
+      this.audit.record(this.shardIndex, input);
+    } catch {
+      /* an unobservable shard still has to serve its sockets */
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -888,7 +1025,12 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
   private async flushBuffer(): Promise<number> {
     if (!this.buffer) return 0;
     try {
-      return await this.buffer.flush();
+      const flushed = await this.buffer.flush();
+      // Depth alone cannot tell a healthy buffer from a stalled one; the moment
+      // of the last successful flush can.
+      this.lastFlushAt = Date.now();
+      this.lastFlushCount = flushed;
+      return flushed;
     } catch (error) {
       this.log.error("buffer flush failed", { error: String(error), room: this.roomId });
       return 0;
@@ -901,9 +1043,27 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
     code: RejectCode,
     reason: string,
     retryAfterMs?: number,
+    /**
+     * Who was refused and by which gate. Optional so a caller that has no
+     * socket metadata still rejects; the counter is what the pipeline needs,
+     * the attribution is what a human watching needs.
+     */
+    actor?: { userId: string; name?: string; gate?: string },
   ): void {
     this.rejectedCount++;
+    this.rollRateWindow(Date.now());
+    this.windowRejected++;
     this.countersDirty = true;
+    if (actor) {
+      this.recordAudit({
+        kind: "reject",
+        userId: actor.userId,
+        name: actor.name,
+        gate: actor.gate,
+        code,
+        reason,
+      });
+    }
     this.send(ws, { t: "rejected", cid, code, reason, retryAfterMs });
   }
 

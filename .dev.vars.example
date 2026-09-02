@@ -1,3 +1,11 @@
 # Copy to .dev.vars for local development (never commit .dev.vars)
 JWT_HS256_SECRET="local-dev-secret-change-me"
 MODERATOR_API_KEY="local-moderator-key"
+
+# Opcional: liga o card "Analytics da conta Cloudflare" no console.
+# Sem estes dois o painel ao vivo funciona igual e o card diz "somente local".
+# O token precisa de uma permissão só: Account -> Account Analytics -> Read.
+# CF_ACCOUNT_ID e o account tag (32 hex) que aparece na barra lateral do dash.
+#CF_API_TOKEN=""
+#CF_ACCOUNT_ID=""
+#CF_SCRIPT_NAME="live-chat"

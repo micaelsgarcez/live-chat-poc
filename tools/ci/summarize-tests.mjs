@@ -32,6 +32,7 @@ const FUNCTIONALITIES = [
   ["src/features/routing", "Roteamento e shard placement"],
   ["src/features/room", "Configuração de sala"],
   ["src/features/connect", "Handshake de conexão"],
+  ["src/features/observability", "Observabilidade (auditoria + painel Cloudflare)"],
   ["src/realtime/coordinator", "RoomCoordinator (registro, fanout, escala)"],
   ["src/realtime/shard", "ChatShard (hibernação, presença, backpressure)"],
   ["src/shared", "Kernel compartilhado"],
