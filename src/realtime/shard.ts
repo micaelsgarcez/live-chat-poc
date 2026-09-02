@@ -128,11 +128,16 @@ const MAX_UNREGISTER_ATTEMPTS = 5;
 export class ChatShard extends DurableObject<Env> implements ShardApi {
   private config: RoomConfig | null = null;
   /**
-   * Per-socket delivery allowance. Keyed on the socket itself and weak on
-   * purpose: a budget is warm state, worth nothing after a hibernation, and
-   * must never be the reason a closed connection stays reachable.
+   * Per-socket warm state for the fanout loop: the delivery allowance, and the
+   * user id read off the attachment once.
+   *
+   * Keyed on the socket and weak on purpose — this is warm state, worth nothing
+   * after a hibernation, and must never be the reason a closed connection stays
+   * reachable. Caching the id matters: `deserializeAttachment` is a structured
+   * clone, and calling it per socket per fanout made the delivery loop cost
+   * grow with the size of the room for no reason at all.
    */
-  private readonly budgets = new WeakMap<WebSocket, ViewerBudget>();
+  private readonly socketState = new WeakMap<WebSocket, { budget: ViewerBudget; userId: string }>();
   /** Chat messages this shard withheld from a viewer over its budget. */
   private sampledOut = 0;
   private roomId = "";
@@ -551,31 +556,37 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
     }
 
     const now = Date.now();
+    // Sampling off is the default and the hot path: no budgets, no attachments,
+    // one shared payload, one write per socket.
+    const sampling = cap > 0 && plan.chatCount > 0;
+    const uniformPayload = sampling ? null : plan.payloadFor(plan.chatCount);
+
     let delivered = 0;
     let withheld = 0;
     for (const socket of this.ctx.getWebSockets()) {
       let granted = plan.chatCount;
-      if (cap > 0 && plan.chatCount > 0) {
-        let budget = this.budgets.get(socket);
-        if (!budget) {
-          budget = newViewerBudget(cap, now);
-          this.budgets.set(socket, budget);
+      let state: { budget: ViewerBudget; userId: string } | undefined;
+      if (sampling) {
+        state = this.socketState.get(socket);
+        if (!state) {
+          const meta = socket.deserializeAttachment() as SocketAttachment | null;
+          state = { budget: newViewerBudget(cap, now), userId: meta?.identity.userId ?? "" };
+          this.socketState.set(socket, state);
         }
-        granted = spendBudget(budget, cap, plan.chatCount, now);
+        granted = spendBudget(state.budget, cap, plan.chatCount, now);
         withheld += plan.chatCount - granted;
       }
 
       let ok = true;
       try {
-        socket.send(plan.payloadFor(granted));
+        socket.send(uniformPayload ?? plan.payloadFor(granted));
         // Being sampled out of your own message would look like the room
-        // swallowed it, so the sender gets it on its own frame.
-        if (alwaysOwn && granted < plan.chatCount) {
-          const meta = socket.deserializeAttachment() as SocketAttachment | null;
-          if (meta) {
-            for (const own of plan.missingOwn(meta.identity.userId, granted)) {
-              socket.send(encode(own));
-            }
+        // swallowed it, so the sender gets it on its own frame. Gated on the
+        // author set first: in a big room almost nobody wrote in this window,
+        // and asking each socket would be work proportional to the room.
+        if (alwaysOwn && state && granted < plan.chatCount && plan.authors.has(state.userId)) {
+          for (const own of plan.missingOwn(state.userId, granted)) {
+            socket.send(encode(own));
           }
         }
       } catch {

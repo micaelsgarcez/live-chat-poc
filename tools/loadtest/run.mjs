@@ -25,11 +25,13 @@
  * Usage: node tools/loadtest/run.mjs --help
  */
 import { WebSocket } from "ws";
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import { readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { signJwt, makeBypassSigner, LOADTEST_BYPASS_HEADER } from "./signing.mjs";
 import { estimateCost, readAccountUsage, usageDelta } from "./cost.mjs";
 import { evaluate, diagnoseSaturation, SLO } from "./verdict.mjs";
+import { messageFor, nameFor } from "./voice.mjs";
 
 /**
  * Mirrors `src/features/loadtest/presets.ts`. The server's copy is
@@ -167,7 +169,9 @@ const CAMEL = {
 };
 
 function parseArgs(argv) {
-  const options = { ...DEFAULTS };
+  // Tracked so auto-discovery can fill in what the operator left alone without
+  // ever overriding something they typed.
+  const options = { ...DEFAULTS, _explicit: new Set() };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "-h" || arg === "--help") return { help: true, options };
@@ -199,6 +203,7 @@ function parseArgs(argv) {
       if (eq === -1) i++;
     } else if (STRING.has(rawKey)) {
       options[key] = String(raw ?? "");
+      options._explicit.add(key);
       if (eq === -1) i++;
     } else {
       throw new Error(`unknown option --${rawKey}`);
@@ -345,6 +350,21 @@ const clients = [];
 let stopping = false;
 let bypassSigner = () => null;
 
+/**
+ * How far behind the generator's own event loop is running.
+ *
+ * This is the instrument measuring itself, and it is not optional. Every
+ * latency in this report is timed with `Date.now()` inside this process, so a
+ * backed-up event loop inflates *all* of them equally — and the result looks
+ * exactly like a slow server. The giveaway is delivery latency coming out at or
+ * below ack latency, which cannot happen when the room is the bottleneck.
+ *
+ * One Node process parsing 10k+ messages a second will do this. Without the
+ * number below there is no way to tell that reading from a real result, and a
+ * load test that cannot tell its own lag from the server's is worse than none.
+ */
+const loopDelay = monitorEventLoopDelay({ resolution: 10 });
+
 function spawnClient(index, options, context) {
   const userId = `lt-${options.node}-${index}`;
   const client = {
@@ -367,7 +387,7 @@ function spawnClient(index, options, context) {
     token = signJwt({
       secret: context.jwtSecret,
       userId,
-      name: `load-${index}`,
+      name: nameFor(index),
       issuer: options.issuer,
       audience: options.audience,
     });
@@ -408,7 +428,14 @@ function spawnClient(index, options, context) {
 }
 
 function noteError(error) {
-  const code = error?.code ?? error?.errno ?? "UNKNOWN";
+  // A socket that never opened is the single most important thing to classify,
+  // and `ws` reports an HTTP rejection as a plain message with no `code` — so
+  // without this every 401 in a run lands in the same "UNKNOWN" bucket as an
+  // exhausted port table, which is exactly the confusion this tool exists to
+  // prevent.
+  const message = String(error?.message ?? "");
+  const status = /Unexpected server response:\s*(\d{3})/.exec(message);
+  const code = status ? `HTTP_${status[1]}` : (error?.code ?? error?.errno ?? "UNKNOWN");
   metrics.errorCodes[code] = (metrics.errorCodes[code] ?? 0) + 1;
 }
 
@@ -512,9 +539,10 @@ function sendOne(client) {
   client.seq++;
   const cid = `${client.index}-${client.seq}`;
   const now = Date.now();
-  // The timestamp travels in the body so *receivers* can measure fanout; the
-  // sequence keeps every body unique, which the spam gate cares about.
-  const body = `loadtest ${client.index}#${client.seq} @${now}| lorem ipsum`;
+  // The timestamp travels in the body so *receivers* can measure fanout. The
+  // rest is generated in the product's own voice, because a run is visible on
+  // the public page while it happens — see voice.mjs.
+  const body = messageFor(client.index, client.seq, now);
   client.inflight.set(cid, now);
   try {
     client.ws.send(JSON.stringify({ t: "send", cid, body }));
@@ -560,6 +588,35 @@ async function readShardLoad(base, room) {
 async function readRoomConfig(base, room) {
   const payload = await fetchJson(`${base}/api/rooms/${encodeURIComponent(room)}/config`);
   return payload?.config ?? null;
+}
+
+/**
+ * Asks the deployment what it puts in its own tokens.
+ *
+ * The generator signs 300k JWTs locally, so `iss` and `aud` have to match the
+ * target exactly — and a mismatch fails *every* handshake with a 401, which
+ * looks identical to a capacity wall until you decode a token. Minting one
+ * token and reading the claims off it costs a single request for the whole run
+ * and removes the class of error entirely.
+ *
+ * Returns null when the route is disabled (`ENVIRONMENT=production`), in which
+ * case the flags are the only source and the operator is told so.
+ */
+async function discoverClaims(base) {
+  const payload = await fetchJson(`${base}/api/dev/token`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ userId: "loadtest-probe", name: "probe" }),
+  });
+  if (!payload?.token) return null;
+  try {
+    const [, body] = payload.token.split(".");
+    const claims = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+    if (typeof claims.iss !== "string" || typeof claims.aud !== "string") return null;
+    return { issuer: claims.iss, audience: claims.aud };
+  } catch {
+    return null;
+  }
 }
 
 async function readPresets(base, room) {
@@ -619,7 +676,16 @@ function portRange() {
   }
 }
 
+/** Nanoseconds to whole milliseconds; the histogram reports in ns. */
+const toMs = (ns) => Math.round(ns / 1e6);
+
 function buildReport(options, context, partial) {
+  loopDelay.disable();
+  const generatorLagMs = {
+    p50: toMs(loopDelay.percentile(50)),
+    p99: toMs(loopDelay.percentile(99)),
+    max: toMs(loopDelay.max),
+  };
   const elapsedMs = Math.max(1, Date.now() - metrics.startedAt);
   const seconds = elapsedMs / 1000;
   const connected = clients.filter((c) => c.open).length;
@@ -713,12 +779,17 @@ function buildReport(options, context, partial) {
       presenceAfter: metrics.presenceAfterDrain,
     },
     verdict,
+    generatorLagMs,
     saturation: diagnoseSaturation({
       requested: options.clients,
       opened: metrics.connectionsOpened,
       failed: metrics.connectionsFailed,
       portRange: portRange(),
       errorCodes: metrics.errorCodes,
+      generatorLagMs,
+      framesPerSecond: Math.round(metrics.delivered / seconds),
+      ackP50: metrics.holdAck.summary().p50,
+      deliveryP50: metrics.holdDelivery.summary().p50,
     }),
     cost: { estimated: cost, measured: context.usage ?? null },
     slo: SLO,
@@ -762,6 +833,9 @@ function printReport(report) {
   p(latencyLine("ack (hold)", report.latency.holdAckMs));
   p(latencyLine("delivery (all)", report.latency.deliveryMs));
   p(latencyLine("delivery (hold)", report.latency.holdDeliveryMs));
+  p(
+    `  ${pad("generator lag", 18)} p50 ${pad(`${report.generatorLagMs.p50}ms`, 8)} p99 ${pad(`${report.generatorLagMs.p99}ms`, 8)} max ${pad(`${report.generatorLagMs.max}ms`, 8)} (this process's own event loop)`,
+  );
   if (report.drain.seconds !== null) {
     p(
       `  ${pad("drain", 18)} every socket closed at once; room back to ${report.drain.presenceAfter} present after ${report.drain.seconds}s`,
@@ -892,6 +966,7 @@ async function run(options, context) {
   const base = httpBase(options.url);
   metrics.startedAt = Date.now();
   bypassSigner = makeBypassSigner(context.bypassKey);
+  loopDelay.enable();
 
   // What the room is actually configured with. Reported alongside the result,
   // because a number obtained at one shard count says nothing at another.
@@ -1026,7 +1101,12 @@ async function main() {
     jwtSecret: options.jwtSecret || process.env.JWT_HS256_SECRET || devVars.JWT_HS256_SECRET || "",
     moderatorKey:
       options.moderatorKey || process.env.MODERATOR_API_KEY || devVars.MODERATOR_API_KEY || "",
-    bypassKey: options.bypassKey || process.env.LOADTEST_BYPASS_KEY || "",
+    // `.dev.vars` is gitignored and is already where every other secret this
+    // tool needs lives; leaving it out here was an inconsistency, and it forced
+    // the one key you most want to keep out of a shell history onto the command
+    // line.
+    bypassKey:
+      options.bypassKey || process.env.LOADTEST_BYPASS_KEY || devVars.LOADTEST_BYPASS_KEY || "",
     cfApiToken: process.env.CF_API_TOKEN || devVars.CF_API_TOKEN || "",
     cfAccountId: process.env.CF_ACCOUNT_ID || devVars.CF_ACCOUNT_ID || "",
     cfScriptName: process.env.CF_SCRIPT_NAME || devVars.CF_SCRIPT_NAME || "live-chat",
@@ -1052,6 +1132,25 @@ async function main() {
     options.talkers = shareOf(preset.talkers, options.node, options.nodes);
     options.ramp = preset.rampSeconds;
     options.duration = preset.holdSeconds;
+  }
+
+  // Only when the operator did not say otherwise: an explicit flag always wins,
+  // because testing a deployment against claims it does *not* issue is a valid
+  // thing to want to check.
+  const discovered = await discoverClaims(base);
+  if (discovered) {
+    if (!options._explicit.has("issuer")) options.issuer = discovered.issuer;
+    if (!options._explicit.has("audience")) options.audience = discovered.audience;
+    if (!options.json) {
+      process.stderr.write(
+        `token claims from the deployment: iss=${options.issuer} aud=${options.audience}\n`,
+      );
+    }
+  } else if (!options.json) {
+    process.stderr.write(
+      `could not read token claims from ${base} (dev token route disabled?) — ` +
+        `using iss=${options.issuer} aud=${options.audience}; a mismatch fails every handshake with 401\n`,
+    );
   }
 
   if (options.clients < 1) {

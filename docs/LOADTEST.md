@@ -149,6 +149,59 @@ do run e mostra os dois lado a lado.
 
 ---
 
+### 3.4 Em produção: o que realmente custa latência
+
+Medido contra o deploy real (`live-chat.micaelsgarcez.workers.dev`), sala com 8
+shards, janela de coalescência de 100 ms e teto de 4 msg/s por espectador.
+
+Um 2×2 que isola as duas variáveis — dobrando a carga de entrada de um lado, o
+número de conexões do outro:
+
+| | 400 espectadores | 1.000 espectadores |
+|---|---:|---:|
+| **12 msg/s de entrada** | ack p99 **232 ms** | ack p99 **621 ms** |
+| **30 msg/s de entrada** | ack p99 **236 ms** | — |
+
+**Taxa de entrada é de graça. Conexão custa.** 2,5× mais mensagens entrando não
+mudou nada (232 → 236 ms); 2,5× mais conexões multiplicou a latência por 2,7.
+
+O motivo é estrutural: o shard é um isolate de uma thread só, e o `ack` de quem
+escreve fica atrás do laço que escreve o fanout para cada socket que aquele
+shard segura. Cortar o *volume* entregue não resolve — num teste com 1.000
+espectadores, baixar a entrega de 14.242 para 2.550 msg/s levou o ack de 43 s
+para 12,4 s, ainda inaceitável. O que resolve é reduzir **quantos sockets cada
+shard atende** e **com que frequência o laço roda**.
+
+#### O lever mais barato: a janela de coalescência
+
+Mesma carga (1.000 espectadores, 12 msg/s), só mudando `fanout.batchWindowMs`:
+
+| janela | ack p99 | entrega p99 | entregues/s |
+|---:|---:|---:|---:|
+| 100 ms | 621 ms | 622 ms | 2.675 |
+| **250 ms** | **395 ms** | 636 ms | 2.679 |
+
+Uma linha de configuração, sem deploy: **−36% de latência de ack**, e o
+espectador não sente (a entrega ficou igual dentro do ruído). A janela mais
+larga roda o laço 2,5× menos vezes por segundo, e é exatamente o trabalho por
+socket que ela economiza.
+
+#### O que isso diz sobre `MAX_SOCKETS_PER_SHARD`
+
+A latência é linear em sockets **por shard**: 50 por shard deram 232 ms, 125
+deram 621 ms. O padrão de 5.000 é, portanto, cedo demais para o autoescalador
+servir para alguma coisa — quando ele finalmente dispara, a sala já passou muito
+do ponto em que um espectador aguenta esperar.
+
+O número certo sai de um orçamento de latência, não de um limite de memória.
+`MAX_SOCKETS_PER_SHARD` é *variable* do repositório, então dá para ajustar sem
+tocar em nenhum arquivo congelado.
+
+> **Ressalva honesta:** parte do custo por socket medido acima era um defeito
+> nosso — o laço desserializava o attachment de cada socket a cada rodada. Isso
+> foi corrigido, mas **os números desta seção são anteriores à correção**. O
+> teto por shard precisa ser remedido antes de virar configuração.
+
 ## 4. Por que 50 mil pessoas escrevendo não é entregável — e o que se faz
 
 A conta que motivou metade deste trabalho:

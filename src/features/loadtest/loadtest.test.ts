@@ -1,5 +1,7 @@
-import { SELF, env } from "cloudflare:test";
+import { SELF, createExecutionContext, env, waitOnExecutionContext } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
+import type { Env } from "../../env";
+import { loadTestSlice } from "./index";
 import { LOADTEST_PRESETS, findPreset } from "./presets";
 import { applyProgress, clearRun, newRun, readRun, type LoadTestRun } from "./run";
 
@@ -167,7 +169,21 @@ describe("routes", () => {
   });
 
   it("reports the bypass as unarmed on a deployment that has no secret", async () => {
-    const payload = await body<{ bypassArmed: boolean }>(await SELF.fetch(url()));
-    expect(payload.bypassArmed).toBe(false);
+    // Called against an explicit env instead of through SELF: whoever runs a
+    // load test puts a real key in `.dev.vars`, and reading "unarmed" off the
+    // ambient environment would fail for a reason unrelated to the code.
+    const route = loadTestSlice.routes?.find(
+      (r) => r.method === "GET" && r.path === "/api/rooms/:roomId/loadtest",
+    );
+    if (!route) throw new Error("loadtest slice has no GET route");
+    const ctx = createExecutionContext();
+    const res = await route.handler(
+      new Request(url()),
+      { ...env, LOADTEST_BYPASS_KEY: undefined } as Env,
+      ctx,
+      { params: { roomId: ROOM } },
+    );
+    await waitOnExecutionContext(ctx);
+    expect((await body<{ bypassArmed: boolean }>(res)).bypassArmed).toBe(false);
   });
 });

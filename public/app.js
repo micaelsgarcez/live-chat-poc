@@ -249,9 +249,42 @@ const BODY_TOKENS = new RegExp(
   "giu",
 );
 
+/**
+ * The token a display name becomes inside a mention.
+ *
+ * A mention travels as plain text in the body and is matched by
+ * `[a-z0-9_.-]{1,25}`, so a name with a space or an accent — "peixoto oficial",
+ * "josé" — cannot be written as one verbatim. Folding it to that alphabet is
+ * what lets someone be mentioned by the name they are shown under instead of by
+ * an internal id nobody recognises.
+ *
+ * Returns "" when nothing survives the fold; callers fall back to the user id.
+ */
+function mentionHandle(name) {
+  return (name ?? "")
+    .normalize("NFD")
+    .replace(/\p{M}+/gu, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9_.-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 25);
+}
+
+/** Every form someone may legitimately be addressed by. */
+function myMentionHandles() {
+  const handles = new Set();
+  if (session.userId) handles.add(session.userId.toLowerCase());
+  if (session.name) {
+    handles.add(session.name.toLowerCase());
+    const folded = mentionHandle(session.name);
+    if (folded) handles.add(folded);
+  }
+  return handles;
+}
+
 function mentionsMe(text) {
   if (!session.userId) return false;
-  const needles = new Set([session.userId.toLowerCase(), session.name.toLowerCase()]);
+  const needles = myMentionHandles();
   for (const match of text.matchAll(/@([a-z0-9_.-]{1,25})/gi)) {
     if (needles.has(match[1].toLowerCase())) return true;
   }
@@ -291,10 +324,7 @@ function renderBody(target, text) {
       const span = document.createElement("span");
       span.className = "mention";
       span.textContent = match[0];
-      const me =
-        handle.toLowerCase() === session.userId.toLowerCase() ||
-        handle.toLowerCase() === session.name.toLowerCase();
-      if (me) span.classList.add("mention--me");
+      if (myMentionHandles().has(handle.toLowerCase())) span.classList.add("mention--me");
       target.append(span);
       continue;
     }
@@ -1154,9 +1184,11 @@ function highlightMention(delta) {
 
 function applyMention(index) {
   if (!mentionState) return;
-  const [userId] = mentionState.hits[index ?? mentionState.index];
+  const [userId, name] = mentionState.hits[index ?? mentionState.index];
   const value = dom.body.value;
-  const inserted = `@${userId} `;
+  // The menu shows the display name, so that is what has to land in the box —
+  // inserting the internal id put a string nobody recognises into the message.
+  const inserted = `@${mentionHandle(name) || userId} `;
   dom.body.value = value.slice(0, mentionState.start) + inserted + value.slice(mentionState.end);
   const caret = mentionState.start + inserted.length;
   dom.body.setSelectionRange(caret, caret);

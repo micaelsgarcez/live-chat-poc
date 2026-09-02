@@ -56,8 +56,15 @@ function listJson(args) {
 }
 
 /** True when a create failed only because the resource is already there. */
+/**
+ * "This already exists" is the expected answer on a re-run, not a failure —
+ * this script is supposed to be idempotent. Cloudflare words it differently per
+ * resource, and Queues says "name is already taken" with code 11009, so the
+ * wording *and* the code are both matched: a re-run that stops here would be a
+ * bug in this script, not a problem with the account.
+ */
 function alreadyExists(output) {
-  return /already exists|already have|duplicate/i.test(output);
+  return /already exists|already have|duplicate|already taken|11009/i.test(output);
 }
 
 function provisionD1() {
@@ -126,10 +133,16 @@ function provisionQueues() {
   for (const queue of QUEUES) {
     const { ok, output } = wrangler(["queues", "create", queue], { allowFailure: true });
     if (ok) process.stdout.write(`  fila "${queue}" criada\n`);
-    else if (/already exists|already have/i.test(output)) process.stdout.write(`  fila "${queue}" já existe\n`);
+    else if (alreadyExists(output)) process.stdout.write(`  fila "${queue}" já existe\n`);
     else {
       process.stderr.write(`${output}\n`);
-      throw new Error(`não consegui criar a fila "${queue}" (Queues exige o plano Workers Paid)`);
+      // Naming one likely cause is useful; asserting it is not. The output above
+      // says what actually happened, and blaming the plan for an unrelated
+      // failure sends someone to the billing page for nothing.
+      throw new Error(
+        `não consegui criar a fila "${queue}" — veja a saída acima. ` +
+          `Se a mensagem for de permissão ou de plano, lembre que Queues exige o Workers Paid.`,
+      );
     }
   }
 }
