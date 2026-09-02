@@ -15,6 +15,15 @@ function armed(): Env {
   return { ...env, LOADTEST_BYPASS_KEY: SECRET } as Env;
 }
 
+/**
+ * Built explicitly rather than trusting the ambient `env`: whoever runs a load
+ * test puts a real key in `.dev.vars`, and a test that reads "unarmed" off the
+ * environment then fails for a reason that has nothing to do with the code.
+ */
+function unarmed(): Env {
+  return { ...env, LOADTEST_BYPASS_KEY: undefined } as Env;
+}
+
 async function request(header?: string): Promise<Request> {
   return new Request("https://example.com/ws/demo", {
     headers: header ? { [LOADTEST_BYPASS_HEADER]: header } : {},
@@ -27,9 +36,10 @@ async function signedHeader(timestamp: number, secret = SECRET): Promise<string>
 
 describe("load test bypass", () => {
   it("does not exist until a secret is configured", async () => {
-    expect(bypassArmed(env)).toBe(false);
+    expect(bypassArmed(unarmed())).toBe(false);
     // Even a signature that would otherwise be perfect is refused.
-    expect(await hasLoadTestBypass(await request(await signedHeader(Date.now())), env)).toBe(false);
+    const perfect = await request(await signedHeader(Date.now()));
+    expect(await hasLoadTestBypass(perfect, unarmed())).toBe(false);
   });
 
   it("reports itself as armed once the secret is there", () => {

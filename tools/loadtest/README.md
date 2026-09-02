@@ -66,7 +66,7 @@ node tools/loadtest/run.mjs --preset medium --nodes 5 --node 2
 | `--nodes` / `--node` | `1` / `0` | divide um preset entre máquinas |
 | `--jwt-secret` | `$JWT_HS256_SECRET`, senão `.dev.vars` | assina os tokens localmente |
 | `--moderator-key` | `$MODERATOR_API_KEY`, senão `.dev.vars` | anuncia o run para a página pública |
-| `--bypass-key` | `$LOADTEST_BYPASS_KEY` | pula o limite de conexões da borda |
+| `--bypass-key` | `$LOADTEST_BYPASS_KEY`, senão `.dev.vars` | pula o limite de conexões da borda |
 | `--no-announce` | — | não anuncia (use nas máquinas que não são a 0) |
 | `--drain-timeout` | `30` | segundos esperando a sala esvaziar depois do dreno |
 | `--json` | off | imprime o relatório como JSON |

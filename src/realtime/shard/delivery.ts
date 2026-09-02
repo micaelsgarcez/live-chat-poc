@@ -58,6 +58,15 @@ export interface DeliveryPlan {
   readonly chatCount: number;
   /** True when every socket receives everything, i.e. no budget can bite. */
   readonly uniform: boolean;
+  /**
+   * Who wrote the chat events in this window.
+   *
+   * Lets the shard skip the "did this socket get sampled out of its own
+   * message" question for the overwhelming majority of sockets, which wrote
+   * nothing. In a room of thousands, a 100 ms window has a handful of authors —
+   * asking per socket is work proportional to the room instead of to the window.
+   */
+  readonly authors: ReadonlySet<string>;
   /** Encoded frame for a socket allowed `k` of the chat events. */
   payloadFor(k: number): string;
   /** Chat events authored by `userId` that a budget of `k` would have dropped. */
@@ -91,10 +100,13 @@ export function planDelivery(events: ServerEvent[], rng: () => number = Math.ran
   }
 
   const memo = new Array<string | undefined>(chatCount + 1);
+  const authors = new Set<string>();
+  for (const index of chatIndices) authors.add((events[index] as ServerChat).m.userId);
 
   return {
     chatCount,
     uniform: chatCount === 0,
+    authors,
 
     payloadFor(k: number): string {
       const budget = Math.max(0, Math.min(chatCount, k));

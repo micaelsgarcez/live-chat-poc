@@ -116,8 +116,54 @@ export function evaluate(input) {
  * that is the chat's ceiling or the laptop's, which makes the number useless.
  * These are the three walls one machine actually hits, in the order it hits them.
  */
-export function diagnoseSaturation({ requested, opened, failed, portRange, errorCodes }) {
+export function diagnoseSaturation({
+  requested,
+  opened,
+  failed,
+  portRange,
+  errorCodes,
+  generatorLagMs,
+  framesPerSecond,
+  ackP50,
+  deliveryP50,
+}) {
   const reasons = [];
+
+  // Checked first, because when it is true nothing else in the report can be
+  // trusted. Every latency here is timed inside this process, so a backed-up
+  // event loop inflates all of them and looks exactly like a slow server.
+  const lag = generatorLagMs?.p99 ?? 0;
+  if (lag >= 100) {
+    reasons.push(
+      `THE GENERATOR ITSELF: its event loop ran ${lag}ms behind at p99 (p50 ${generatorLagMs.p50}ms) ` +
+        `while absorbing ~${framesPerSecond} messages/s in one Node process. Every latency above ` +
+        `includes that delay — they are this machine's numbers, not the room's. Lower the viewer cap, ` +
+        `cut talkers, or split the run across more machines with --nodes.`,
+    );
+  }
+
+  // Delivery covers strictly more hops than ack, so it coming out at or below
+  // ack means both were dominated by a delay they share — which is this
+  // process, not the network.
+  if (
+    Number.isFinite(ackP50) &&
+    Number.isFinite(deliveryP50) &&
+    ackP50 > 0 &&
+    deliveryP50 <= ackP50
+  ) {
+    // Which shared stage it is depends on the lag above, and getting this
+    // backwards sends you to optimise the wrong machine.
+    const culprit =
+      lag >= 100
+        ? "this process — see the lag above"
+        : "server side: the generator's own loop was clean, so the stage both paths queue behind is " +
+          "the shard writing the fanout. One Durable Object writing frames to every socket it holds " +
+          "is the thing shardCount exists to divide.";
+    reasons.push(
+      `delivery p50 (${deliveryP50}ms) came out at or below ack p50 (${ackP50}ms), which cannot happen ` +
+        `on merit: delivery has strictly more hops. Both queued behind a stage they share, and it is ${culprit}`,
+    );
+  }
 
   const ports = Math.max(0, portRange.end - portRange.start + 1);
   if (opened >= ports * 0.9) {
@@ -141,12 +187,26 @@ export function diagnoseSaturation({ requested, opened, failed, portRange, error
       );
     } else if (code === "ETIMEDOUT") {
       reasons.push(`${count} handshakes timed out (${code}) — TLS setup is the bottleneck, add CPU or machines.`);
+    } else if (code === "HTTP_401") {
+      reasons.push(
+        `${count} handshakes were rejected with 401 — the tokens are not valid for this deployment. ` +
+          `Check --issuer / --audience against what it actually issues, and that --jwt-secret is its JWT_HS256_SECRET.`,
+      );
+    } else if (code === "HTTP_429") {
+      reasons.push(
+        `${count} handshakes were rate limited (429) — the edge connection limit is doing its job. ` +
+          `Arm LOADTEST_BYPASS_KEY and pass --bypass-key, or this is not a capacity result.`,
+      );
+    } else if (code === "HTTP_403") {
+      reasons.push(`${count} handshakes were forbidden (403) — banned user, or the room is closed.`);
+    } else if (code.startsWith("HTTP_")) {
+      reasons.push(`${count} handshakes were refused with ${code.slice(5)} — nothing to do with load.`);
     } else {
       reasons.push(`${count}x ${code} during connect.`);
     }
   }
 
-  if (failed === 0 && opened >= requested) {
+  if (reasons.length === 0 && failed === 0 && opened >= requested) {
     reasons.push("nothing saturated: every socket the run asked for was opened.");
   }
 

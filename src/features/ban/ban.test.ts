@@ -6,7 +6,13 @@ import { banKey } from "./hot-list";
 import { createBanStore } from "./store";
 import { ensureBanSchema } from "./test-support";
 
-const MOD_HEADERS = { "content-type": "application/json", "x-moderator-key": "local-moderator-key" };
+// Read from the environment rather than hardcoded: the literal only matched the
+// value that ships in `.dev.vars.example`, so anyone who put a real key there —
+// to drive a load test, say — failed this suite for no reason of their own.
+const MOD_HEADERS = {
+  "content-type": "application/json",
+  "x-moderator-key": env.MODERATOR_API_KEY!,
+};
 
 /** Raw upgrade attempt: `TestClient.connect` asserts 101, and we need the 403. */
 function connect(room: string, token: string): Promise<Response> {
