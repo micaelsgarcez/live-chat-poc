@@ -1,110 +1,190 @@
-# Load generator
+# Gerador de carga
 
-Opens N WebSockets against a local `wrangler dev`, makes a subset of them talk
-at a fixed **total** rate, and reports what the room did under that pressure.
-Pure Node — `ws` is already a devDependency, there is nothing to install.
+Abre N WebSockets contra um deploy, faz uma parte deles falar, e **dá um
+veredito** — não só uma tabela. Node puro: `ws` já é devDependency e os JWTs são
+assinados localmente, então não há nada para instalar e o run não gasta
+requisições só para se preparar.
+
+Os resultados medidos e o procedimento para os degraus grandes estão em
+[`docs/LOADTEST.md`](../../docs/LOADTEST.md). Este arquivo é a referência da
+ferramenta.
 
 ```bash
-npm run db:migrate:local   # once
+npm run db:migrate:local   # uma vez
 npm run dev                # terminal 1 — http://127.0.0.1:8787
-npm run loadtest -- --clients 50 --rate 20 --duration 30   # terminal 2
+npm run loadtest -- --clients 25 --talkers 8 --rate 12 --duration 20   # terminal 2
 ```
 
-`npm run loadtest -- <flags>` and `node tools/loadtest/run.mjs <flags>` are the
-same thing.
+`npm run loadtest -- <flags>` e `node tools/loadtest/run.mjs <flags>` são a mesma
+coisa.
+
+## As quatro fases
+
+Um run não é uma curva plana, e cada fase existe por um motivo:
+
+| fase | o quê | por quê |
+|---|---|---|
+| `ramp` | 60 s abrindo sockets e subindo a taxa | é onde o autoescalador e o limitador de borda são testados |
+| `hold` | 30 s no máximo | **a única janela que o veredito julga** — um transiente não descreve o regime |
+| `drain` | todos os sockets fechados de uma vez | é o que acontece quando a live acaba, e o jeito mais barato de achar estado que ninguém limpa |
+| `done` | relatório, veredito, custo | |
+
+## Presets
+
+Seis janelas fixas com a mesma forma (60 s + 30 s), lidas da própria API para
+que exista uma só fonte da verdade:
+
+```bash
+node tools/loadtest/run.mjs --preset smoke   # 1.000 conexões / 200 remetentes
+node tools/loadtest/run.mjs --preset small   # 10.000 / 2.000
+node tools/loadtest/run.mjs --preset medium  # 50.000 / 10.000
+node tools/loadtest/run.mjs --preset large   # 100.000 / 20.000
+node tools/loadtest/run.mjs --preset xlarge  # 200.000 / 35.000
+node tools/loadtest/run.mjs --preset max     # 300.000 / 50.000
+```
+
+Um preset maior que `smoke` não cabe numa máquina. `--nodes N --node i` divide o
+mesmo preset entre N geradores, cada um abrindo a sua fatia:
+
+```bash
+node tools/loadtest/run.mjs --preset medium --nodes 5 --node 2
+```
 
 ## Flags
 
-| Flag | Default | Meaning |
+| Flag | Padrão | O quê |
 |---|---|---|
-| `--url` | `ws://127.0.0.1:8787` | WebSocket origin; the HTTP origin for `POST /api/dev/token` is derived from it |
-| `--room` | `loadtest` | room id every client joins |
-| `--clients` | `20` | sockets to open |
-| `--rate` | `10` | messages per second across **all** talkers combined |
-| `--duration` | `30` | seconds of sending after the ramp |
-| `--ramp` | `5` | seconds to reach full client count and full rate |
-| `--talkers` | all clients | how many clients send; the rest only listen |
-| `--json` | off | print the report as JSON (timeline included) instead of text |
-| `--help` | | usage; works with no server running |
+| `--url` | `ws://127.0.0.1:8787` | origem do WebSocket; a origem HTTP é derivada dela |
+| `--room` | `loadtest` | sala em que todo mundo entra |
+| `--preset` | — | uma das seis janelas fixas; sobrescreve clients/talkers/ramp/duration |
+| `--clients` | `20` | sockets a abrir |
+| `--talkers` | todos | quantos enviam; o resto só assiste |
+| `--rate` | — | mensagens por segundo somando **todos** os remetentes |
+| `--per-talker-rate` | `0.1` | msg/s de cada remetente, quando `--rate` não é dado |
+| `--ramp` | `5` | segundos até a carga cheia |
+| `--duration` | `30` | segundos no máximo |
+| `--nodes` / `--node` | `1` / `0` | divide um preset entre máquinas |
+| `--jwt-secret` | `$JWT_HS256_SECRET`, senão `.dev.vars` | assina os tokens localmente |
+| `--moderator-key` | `$MODERATOR_API_KEY`, senão `.dev.vars` | anuncia o run para a página pública |
+| `--bypass-key` | `$LOADTEST_BYPASS_KEY` | pula o limite de conexões da borda |
+| `--no-announce` | — | não anuncia (use nas máquinas que não são a 0) |
+| `--drain-timeout` | `30` | segundos esperando a sala esvaziar depois do dreno |
+| `--json` | off | imprime o relatório como JSON |
+| `--out <arquivo>` | — | grava o JSON num arquivo |
+| `--help` | | ajuda; funciona sem servidor nenhum |
 
-Each client gets its own dev token from `POST /api/dev/token` as `lt-<index>`,
-which is also what the edge hashes on — so more clients means more shards
-actually exercised.
+## O veredito
 
-## What it measures
+Seis critérios, avaliados só na janela do `hold`. O processo **sai com código 1**
+quando algum reprova, 130 quando é interrompido, 0 quando passa.
 
-- **connections** opened / failed / still open, plus the highest `presence`
-  count a single shard reported (clients only ever see their own shard).
-- **messages** sent, acked, rejected (broken down by `RejectCode`) and how many
-  are still unanswered at the end.
-- **fanout frames**: every `msg` frame received by every client. With 50 viewers
-  and 10 msg/s this is ~500 frames/s — that ratio is the whole point of the
-  shard/coordinator split.
-- **ack latency** — sender → shard → sender, i.e. how fast the inbound pipeline
-  decides.
-- **delivery latency** — end to end: sender → shard → coordinator → every shard
-  → receiver. Measured by embedding the send timestamp in the body, so every
-  *receiving* client contributes a sample.
-- **timeline**: one row per elapsed second with open sockets / sent / acked /
-  rejected / frames.
-
-`p50 / p95 / p99 / max` are reported for all three latencies. Samples are
-reservoir-capped at 50k per series so a long run stays cheap.
-
-`Ctrl-C` stops early and still prints the report, marked `(partial)`.
-
-## Scenarios
-
-```bash
-# smoke: does the room work at all?
-node tools/loadtest/run.mjs --clients 5 --rate 2 --duration 10 --ramp 1
-
-# the PLAN.md peak, low end: 10 msg/s with 100 viewers
-node tools/loadtest/run.mjs --clients 100 --talkers 20 --rate 10 --duration 60 --ramp 10
-
-# the PLAN.md peak, high end: 50 msg/s with 200 viewers
-node tools/loadtest/run.mjs --clients 200 --talkers 40 --rate 50 --duration 60 --ramp 15
-
-# fanout-heavy: many listeners, few talkers — this is the shape a live stream has
-node tools/loadtest/run.mjs --clients 300 --talkers 5 --rate 25 --duration 45 --ramp 20
-
-# machine-readable, for a before/after comparison
-node tools/loadtest/run.mjs --clients 50 --rate 20 --duration 30 --json > after.json
+```
+  === verdict (judged on the 15s hold window only) ===
+  ✓ ack p99                    75ms (limit 250ms)
+  ✓ delivery p99               169ms (limit 1000ms)
+  ✓ handshakes                 0/20 failed (0.00%, limit 0.50%)
+  ✓ no acked message lost      284 acked, 284 came back
+  ✓ presence converges         reported 20 vs 20 open (0.00% drift, limit 1.00%)
+  ✓ shard ceiling respected    busiest shard held 6 of 5000
+  PASS
 ```
 
-## Reading the result
+Os limites estão em `verdict.mjs` (`SLO`). O quarto não tem tolerância: uma
+mensagem confirmada que não voltou para quem escreveu é a falha que a
+arquitetura inteira existe para não ter. Amostragem retém mensagens de
+espectadores — nunca do remetente.
 
-- **`rate_limited` / `slow_mode` / `spam` rejections** are the gates doing their
-  job, not a failure. The default room config allows a burst of 5 and refills 1
-  token per second per user, so a run with fewer talkers than `--rate` will be
-  throttled on purpose. Raise `--talkers` (or relax the config through
-  `PATCH /api/rooms/:roomId/config`) to push real throughput.
-- **`sent` far above `acked`** with no rejections means frames are queued and the
-  shard is behind — look at the timeline for the second where it started.
-- **delivery p99 climbing while ack p99 stays flat** points at the fanout
-  (coordinator → shards), not at the inbound pipeline.
-- **connections failed** on a local run is usually the dev server still booting;
-  give `--ramp` a few more seconds.
-- **`still handshaking` sockets left at the end** means `wrangler dev` (one
-  workerd process on your laptop) is saturated, not that the design is. Past
-  roughly 50 sockets plus 1k fanout frames/s the local rig is the bottleneck —
-  spread the run with a longer `--ramp` or trade viewers for talkers.
+Um critério aparece como `–` (pulado) quando não houve medição, não quando
+passou: `busiest shard held 0 of 5000` é uma medição que não aconteceu, e
+declará-la aprovada seria mentir.
 
-## Teto do ambiente local (medido)
+## O que ele mede
 
-O gargalo local é o proxy do `wrangler dev`, não o Worker. Nesta máquina:
+- **conexões** abertas / perdidas / ainda em handshake, e a maior presença que a
+  sala relatou.
+- **mensagens** enviadas, confirmadas, rejeitadas (por `RejectCode`) e sem
+  resposta no fim.
+- **fanout**: quantas mensagens cada cliente recebeu, em quantos frames de
+  WebSocket, e quantas o teto por espectador reteve.
+- **latência de ack** — remetente → shard → remetente: a velocidade da decisão do
+  pipeline de entrada.
+- **latência de entrega** — fim a fim: remetente → shard → coordinator → todos os
+  shards → receptor. Medida pelo timestamp embutido no corpo, então todo cliente
+  *receptor* contribui com uma amostra.
+- **dreno**: quantos segundos a sala leva para voltar a zero presente depois de
+  todo mundo desconectar junto.
+- **timeline**: uma linha por segundo, com a fase.
 
-| sockets | frames/s | ack p50 | resultado |
-|---|---|---|---|
-| 25 | ~200 | 23 ms | limpo |
-| 40 | ~560 | 1.7 s | conecta tudo, mas a latência vira segundos |
-| 50 | ~300 | 1.4 s | começa a perder handshakes |
-| 100+ | — | — | o proxy morre com `Network connection lost` |
+`p50 / p95 / p99 / max` para as três latências, e as de ack e entrega aparecem
+duas vezes: o run inteiro e só o `hold`. Amostras têm reservoir de 50 mil por
+série, então um run longo continua barato.
 
-O log do wrangler mostra `Error in ProxyController: Error inside ProxyWorker`
-sem nenhum erro do lado do Worker — não há limite de subrequest, memória ou
-exceção da aplicação envolvidos. Para números acima disso, aponte o `--url`
-para um deploy real (`wrangler deploy` e `wss://<worker>.workers.dev`).
+`Ctrl-C` para mais cedo, imprime o relatório marcado `(partial)` e sai com 130 —
+um run interrompido não é um veredito.
 
-Use a faixa de até ~25 sockets para comparar mudanças de código: é onde a
-medição reflete o Worker e não a ferramenta.
+## Diagnóstico de saturação
+
+Um relatório que diz "chegamos a 28.000 sockets" é inútil se não disser se
+aquilo foi o teto do chat ou o teto do notebook. A seção `what saturated`
+distingue:
+
+```
+  === what saturated ===
+  · ephemeral ports: 28100 sockets against a range of 28231 (32768-60999).
+    One machine cannot exceed this per destination IP — widen
+    net.ipv4.ip_local_port_range or add a machine.
+```
+
+Ela reconhece portas efêmeras esgotadas, descritores (`EMFILE`), endereço local
+indisponível (`EADDRNOTAVAIL`), handshake estourando por tempo (`ETIMEDOUT`) e
+conexões recusadas pelo outro lado (`ECONNRESET`/`ECONNREFUSED`) — este último
+sendo o único que aponta para o servidor, e não para o gerador.
+
+## Custo
+
+Duas contas, lado a lado:
+
+- **estimada** a partir do que o próprio gerador contou, com a tabela de preços
+  versionada em `cost.mjs`. Sai na hora.
+- **medida** pelo GraphQL Analytics da Cloudflare, como delta antes/depois do
+  run, quando `CF_API_TOKEN` e `CF_ACCOUNT_ID` existem. Correta, mas atrasa
+  minutos e agrega por minuto — um run de 90 s cai mal nesse balde.
+
+A divergência entre as duas é informação: ou o modelo de custo está incompleto,
+ou o run fez algo que ninguém planejou.
+
+## Lendo o resultado
+
+- **rejeições `rate_limited` / `slow_mode` / `spam`** são os gates funcionando,
+  não uma falha. A config padrão permite rajada de 5 e recarrega 1 token/s por
+  usuário; um run com menos remetentes que `--rate` é estrangulado de propósito.
+  Suba `--talkers` ou afrouxe a sala com `PATCH /api/rooms/:roomId/config`.
+- **`sent` muito acima de `acked`** sem rejeições: os frames estão enfileirados e
+  o shard está atrasado — procure na timeline o segundo em que começou.
+- **entrega p99 subindo com ack p99 estável** aponta para o fanout
+  (coordinator → shards), não para o pipeline de entrada.
+- **o primeiro run contra uma sala nova reprova por cold start.** Medido: 371 ms
+  de ack p99 na sala fria contra 87 ms no mesmo run repetido. Rode duas vezes e
+  reporte o segundo, ou aqueça a sala antes.
+- **`still handshaking` no fim, localmente**, significa que o `wrangler dev`
+  saturou — não o desenho.
+
+## O teto do ambiente local (medido)
+
+O gargalo local é o proxy do `wrangler dev`, e ele cede por **frames por
+segundo**, não por sockets. Nesta máquina (16 vCPU, 15 GB):
+
+| sockets | msg/s entregues | ack p99 | resultado |
+|---:|---:|---:|---|
+| 25 | 164 | 87 ms | limpo |
+| 50 | 348 | 103 ms | limpo |
+| 100 | 666 | 69 ms | limpo |
+| 200 | 1.302 | 1.457 ms | conecta tudo, latência vira segundos |
+| 100 @ 60 msg/s | (~4.000) | — | o proxy morre com um `ERROR` vazio |
+
+O log do wrangler mostra `Error in ProxyController` sem nenhum erro do lado do
+Worker — não há limite de subrequest, memória ou exceção da aplicação
+envolvidos. Para números acima disso, aponte `--url` para um deploy real.
+
+Use a faixa até ~100 sockets / ~700 frames/s para comparar mudanças de código: é
+onde a medição reflete o Worker e não a ferramenta.

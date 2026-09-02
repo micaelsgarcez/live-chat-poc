@@ -56,6 +56,32 @@ export interface PersistenceConfig {
   maxBufferedMessages: number;
 }
 
+/**
+ * How the room gets a message from the coordinator to a socket.
+ *
+ * Both knobs are off by default, so a room behaves exactly as it did before
+ * they existed: one message, one RPC per shard, one frame per viewer. They earn
+ * their keep only when the room is large enough that 1:N fanout stops being
+ * deliverable — and being runtime config is the point, because the number where
+ * that happens is what a load test is for.
+ */
+export interface FanoutConfig {
+  /**
+   * Coalescing window at the coordinator, in ms. 0 publishes each message on
+   * its own. The delay is paid by *viewers*, never by the sender: the shard
+   * acks before the coordinator flushes.
+   */
+  batchWindowMs: number;
+  /**
+   * Chat messages a single socket may receive per second. 0 is unlimited.
+   * Above this the shard samples: every viewer keeps a readable stream, no two
+   * viewers see quite the same one, and the frame says how many were withheld.
+   */
+  maxPerViewerPerSecond: number;
+  /** A sender always sees their own message, even when sampled out for others. */
+  alwaysDeliverOwn: boolean;
+}
+
 export interface RoomConfig {
   roomId: string;
   /** Bumped by the coordinator on every change; shards ignore stale versions. */
@@ -70,6 +96,7 @@ export interface RoomConfig {
   spam: SpamConfig;
   moderation: ModerationConfig;
   persistence: PersistenceConfig;
+  fanout: FanoutConfig;
   /** Roles exempt from slow-mode, rate-limit and spam gates. */
   privilegedRoles: string[];
 }
@@ -86,6 +113,7 @@ export type RoomConfigPatch = Partial<
     | "spam"
     | "moderation"
     | "persistence"
+    | "fanout"
     | "privilegedRoles"
   >
 >;
@@ -126,7 +154,33 @@ export function defaultRoomConfig(roomId: string, shardCount = 4): RoomConfig {
       flushIntervalMs: 2_000,
       maxBufferedMessages: 5_000,
     },
+    // Off: a room only pays for batching and sampling once it is big enough to
+    // need them, and a default that changes delivery would be a surprise.
+    fanout: { batchWindowMs: 0, maxPerViewerPerSecond: 0, alwaysDeliverOwn: true },
     privilegedRoles: ["moderator", "admin", "system"],
+  };
+}
+
+/**
+ * Fills in blocks a stored config predates.
+ *
+ * A `RoomConfig` is persisted in Durable Object storage, so a room that existed
+ * before a field was added reads back without it — and a shard that then
+ * dereferences that field throws on the *upgrade path*, taking down a room that
+ * was working a moment earlier. Every read of a stored config goes through
+ * here, so adding a field to `RoomConfig` stays a non-event for rooms that
+ * already exist.
+ */
+export function normalizeRoomConfig(stored: RoomConfig): RoomConfig {
+  const defaults = defaultRoomConfig(stored.roomId, stored.shardCount);
+  return {
+    ...defaults,
+    ...stored,
+    rateLimit: { ...defaults.rateLimit, ...stored.rateLimit },
+    spam: { ...defaults.spam, ...stored.spam },
+    moderation: { ...defaults.moderation, ...stored.moderation },
+    persistence: { ...defaults.persistence, ...stored.persistence },
+    fanout: { ...defaults.fanout, ...stored.fanout },
   };
 }
 
@@ -140,6 +194,7 @@ export function mergeRoomConfig(base: RoomConfig, patch: RoomConfigPatch): RoomC
     spam: { ...base.spam, ...patch.spam },
     moderation: { ...base.moderation, ...patch.moderation },
     persistence: { ...base.persistence, ...patch.persistence },
+    fanout: { ...base.fanout, ...patch.fanout },
   };
 }
 
@@ -150,5 +205,6 @@ export function toPublicConfig(config: RoomConfig): PublicRoomConfig {
     slowModeMs: config.slowModeMs,
     maxMessageLength: config.maxMessageLength,
     closed: config.closed,
+    maxDeliveredPerSecond: config.fanout.maxPerViewerPerSecond,
   };
 }

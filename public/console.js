@@ -91,6 +91,10 @@ const el = {
   shardsEmpty: $("shards-empty"),
   cfNote: $("cf-note"),
   cfBody: $("cf-body"),
+  loadtest: $("loadtest"),
+  loadtestNote: $("loadtest-note"),
+  loadtestFill: $("loadtest-fill"),
+  loadtestBody: $("loadtest-body"),
 };
 
 const state = {
@@ -573,6 +577,9 @@ function renderCloudflare(payload) {
 /* ------------------------------------------------------------------ */
 
 function applySnapshot(snapshot) {
+  // Kept so the load-test panel can put the room's own connection count next to
+  // what the generator claims, without polling observability a second time.
+  state.lastSnapshot = snapshot;
   const revealed = snapshot.revealed === true;
   el.lock.dataset.revealed = String(revealed);
   el.lockText.textContent = revealed ? "moderador" : "anônimo";
@@ -633,6 +640,98 @@ function schedule() {
   state.timer = setTimeout(poll, delay);
 }
 
+/* ------------------------------------------------------------------ */
+/* load test                                                           */
+/* ------------------------------------------------------------------ */
+
+const PHASE_LABEL = {
+  ramp: "subindo",
+  hold: "no máximo",
+  drain: "desconectando",
+  done: "encerrado",
+};
+
+/**
+ * The panel that makes a run legible while it happens.
+ *
+ * Two counts are always shown side by side and that is the whole point: what
+ * the *generator* believes it opened, and what the *room* reports. They should
+ * agree; when they do not, the gap is the finding, and hiding it behind one
+ * averaged number would throw away the most interesting thing on the page.
+ */
+function renderLoadTest(payload, snapshot) {
+  const run = payload?.run;
+  if (!run) {
+    el.loadtest.hidden = true;
+    return;
+  }
+  el.loadtest.hidden = false;
+
+  const target = run.targetConnections || 1;
+  const claimed = run.progress.open;
+  const observed = snapshot?.totals?.connections ?? 0;
+  const share = Math.min(1, claimed / target);
+  el.loadtestFill.style.width = `${(share * 100).toFixed(1)}%`;
+
+  const elapsed = Math.round((Date.now() - run.startedAt) / 1000);
+  el.loadtestNote.textContent =
+    `preset ${run.preset} · ${PHASE_LABEL[run.phase] ?? run.phase} · ${elapsed}s · ` +
+    `rampa ${run.rampSeconds}s + ${run.holdSeconds}s no topo`;
+
+  const grid = document.createElement("div");
+  grid.className = "tiles";
+  grid.append(
+    tile("Conexões (gerador)", compact(claimed), `de ${compact(target)} · ${(share * 100).toFixed(1)}%`),
+    tile(
+      "Conexões (sala)",
+      compact(observed),
+      claimed > 0 && Math.abs(observed - claimed) / claimed > 0.01
+        ? `diverge do gerador em ${compact(Math.abs(observed - claimed))}`
+        : "confere com o gerador",
+      claimed > 0 && Math.abs(observed - claimed) / claimed > 0.01 ? "down" : undefined,
+    ),
+    tile("Remetentes", compact(run.targetTalkers), "planejados"),
+    tile("Enviadas", compact(run.progress.sent), `${compact(run.progress.acked)} confirmadas`),
+    tile(
+      "Rejeitadas",
+      compact(run.progress.rejected),
+      "pelos gates",
+      run.progress.rejected > 0 ? "warn" : undefined,
+    ),
+    tile("Handshakes perdidos", compact(run.progress.failed), "no gerador", run.progress.failed > 0 ? "down" : undefined),
+  );
+
+  const children = [grid];
+  if (run.bypass) {
+    // A number obtained with the connection limiter switched off must never be
+    // mistaken for a normal one, so the page says so while it is happening.
+    const warning = document.createElement("div");
+    warning.className = "cf-note";
+    warning.innerHTML = `<svg style="width:16px;height:16px;flex:none;fill:var(--warn,#d99a2b)" aria-hidden="true"><use href="#i-alert" /></svg><span></span>`;
+    warning.querySelector("span").textContent =
+      "Este run passa por cima do limite de conexões da borda. As pessoas na sala pública continuam sujeitas a ele.";
+    children.push(warning);
+  }
+  if (run.note) {
+    const note = document.createElement("p");
+    note.className = "card__note";
+    note.textContent = run.note;
+    children.push(note);
+  }
+  el.loadtestBody.replaceChildren(...children);
+}
+
+async function pollLoadTest() {
+  try {
+    const res = await fetch(`/api/rooms/${state.roomId}/loadtest`);
+    const body = res.ok ? await res.json() : null;
+    renderLoadTest(body, state.lastSnapshot);
+  } catch {
+    // A run that cannot be read is indistinguishable from no run; leave the
+    // panel as it is rather than flapping it off and on.
+  }
+}
+
 async function pollCloudflare() {
   try {
     const res = await fetch(`/api/rooms/${state.roomId}/observability/cloudflare`);
@@ -674,5 +773,9 @@ export function mountConsole({ roomId, context, onRequestModerator }) {
   document.addEventListener("visibilitychange", schedule);
   void poll();
   void pollCloudflare();
+  void pollLoadTest();
   state.cloudflareTimer = setInterval(pollCloudflare, POLL_CLOUDFLARE_MS);
+  // Polled over HTTP rather than pushed over the socket: telemetry about a load
+  // test must not compete with the load test for the shard's attention.
+  state.loadTestTimer = setInterval(pollLoadTest, POLL_ACTIVE_MS);
 }

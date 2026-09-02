@@ -58,8 +58,12 @@
   --tap: 30px;
   --header-h: 56px;
   --chat-w: 352px;
-  --font: Inter, "Segoe UI Variable Text", "Segoe UI", Roboto, "Helvetica Neue",
-    Arial, "Noto Sans", sans-serif;
+  /* Montserrat is loaded from Google Fonts in index.html. The stack behind it is
+     the whole fallback chain, not decoration: the project has to work with no
+     network at all, and a machine that cannot reach fonts.gstatic.com should
+     land on a system sans rather than on Times. */
+  --font: Montserrat, "Segoe UI Variable Text", "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", sans-serif;
   /* The last two are monochrome fallbacks: a machine with no colour emoji font
      should still draw a glyph rather than a tofu box. */
   --emoji: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji",
@@ -945,6 +949,35 @@ body {
   color: var(--muted);
   font-size: 11px;
   font-weight: 600;
+}
+
+/* The load-test panel. Deliberately loud: a page showing numbers from a room
+   under synthetic load must not be mistaken for a page showing normal traffic. */
+.card--loadtest {
+  border-color: color-mix(in srgb, var(--brand) 45%, transparent);
+}
+
+.loadtest__bar {
+  height: 6px;
+  margin: 8px 0 12px;
+  border-radius: 99px;
+  background: var(--panel-3);
+  overflow: hidden;
+}
+
+.loadtest__fill {
+  height: 100%;
+  width: 0;
+  border-radius: 99px;
+  background: var(--brand);
+  transition: width 0.6s ease-out;
+}
+
+/* A sampled stream has to say so: the alternative is a chat that looks like it
+   is losing messages at random, which is exactly what it is doing. */
+.slow-pill--sampled {
+  background: color-mix(in srgb, var(--warn, #d99a2b) 22%, var(--panel-3));
+  color: var(--warn, #d99a2b);
 }
 
 /* @mention autocomplete */

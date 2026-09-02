@@ -17,12 +17,24 @@ export class TestClient {
   constructor(readonly ws: WebSocket) {
     ws.addEventListener("message", (event) => {
       const parsed = JSON.parse(event.data as string) as ServerMessage;
-      this.received.push(parsed);
-      this.waiters = this.waiters.filter((waiter) => {
-        if (!waiter.predicate(parsed)) return true;
-        waiter.resolve(parsed);
-        return false;
-      });
+      // A batch is a transport detail, not something a test should assert on:
+      // it is unwrapped here so `waitFor("msg")` reads the same whether or not
+      // the room happens to be coalescing.
+      if (parsed.t === "batch") {
+        this.ingest(parsed);
+        for (const inner of parsed.events) this.ingest(inner);
+        return;
+      }
+      this.ingest(parsed);
+    });
+  }
+
+  private ingest(message: ServerMessage): void {
+    this.received.push(message);
+    this.waiters = this.waiters.filter((waiter) => {
+      if (!waiter.predicate(message)) return true;
+      waiter.resolve(message);
+      return false;
     });
   }
 

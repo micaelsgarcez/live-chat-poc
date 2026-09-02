@@ -138,6 +138,13 @@ faltarem, e no fim imprime os comandos `gh` já preenchidos com os ids.
 | `JWT_HS256_SECRET` | chave dos tokens HS256 (também usada pela verificação pós-deploy) |
 | `MODERATOR_API_KEY` | header `x-moderator-key` das rotas de moderação |
 
+> **`LOADTEST_BYPASS_KEY` não entra nesta tabela de propósito.** Ele permite
+> pular o limite de conexões da borda e por isso **não é secret de pipeline**:
+> deve ser posto à mão com `wrangler secret put` imediatamente antes de um teste
+> de carga e removido com `wrangler secret delete` logo depois. Enquanto ele não
+> existe, o bypass não existe — e é assim que a demo pública fica por padrão.
+> Veja [`LOADTEST.md`](LOADTEST.md).
+
 **Variables** (`gh variable set NOME --body ...`):
 
 | Variable | Padrão | Para quê |
@@ -202,6 +209,15 @@ aditivas, um rollback de código roda contra o schema novo sem problema.
   recursos (KV, D1, filas) e dobra o custo. Quando fizer sentido, é o mesmo
   `render-wrangler-config.mjs` com `CF_ENVIRONMENT=staging` e outro conjunto de
   variables.
-- **Teste de carga no CI.** O `npm run loadtest` mede o teto do `wrangler dev`,
-  não o da arquitetura (veja o `README.md`); rodá-lo a cada push só mediria o
-  runner do GitHub.
+- **Teste de carga no CI.** O `npm run loadtest` contra um `wrangler dev` mede o
+  teto do proxy, não o da arquitetura; rodá-lo a cada push só mediria o runner
+  do GitHub. E os presets grandes gastam dinheiro de verdade e precisam do
+  bypass do limite de conexões armado — nada disso deve ser disparado por um
+  push. Veja [`LOADTEST.md`](LOADTEST.md).
+
+## Subir da sua máquina, sem GitHub Actions
+
+O caminho curto — `wrangler login`, `provision.mjs`, `render-wrangler-config.mjs`,
+`deploy` — está no [`README.md`](../README.md#subir-na-cloudflare-em-cinco-minutos).
+Ele usa exatamente os mesmos scripts que o workflow usa, então o que funciona lá
+funciona aqui; a diferença é só de onde vêm os ids e os secrets.

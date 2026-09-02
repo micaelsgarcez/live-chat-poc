@@ -119,6 +119,10 @@ async function realtimeCheck() {
       "8",
       "--ramp",
       "2",
+      // The drain phase waits for the room to empty; six sockets do that almost
+      // at once, and CI should not sit on the default 30s ceiling to find out.
+      "--drain-timeout",
+      "5",
       "--json",
     ],
     { env: process.env },
@@ -163,11 +167,26 @@ async function realtimeCheck() {
   const ranking = await fetch(`${BASE}/api/rooms/${ROOM}/ranking?refresh=1`);
   record("ranking recalcula de D1 para o KV", ranking.ok, `${ranking.status}`);
 
+  // The generator's last phase closes every socket at once, and a shard with no
+  // sockets left unregisters itself. So by the time we get here the right number
+  // of registered shards is *zero* — asserting otherwise would be asserting that
+  // the cleanup failed. What has to survive is the counter.
   const stats = (await fetch(`${BASE}/api/rooms/${ROOM}/stats`).then((r) => r.json()))?.stats;
   record(
-    "o coordinator registrou os shards e contou as publicações",
-    (stats?.registeredShards?.length ?? 0) > 0 && (stats?.messagesPublished ?? 0) > 0,
-    `${stats?.registeredShards?.length ?? 0} shards, ${stats?.messagesPublished ?? 0} publicadas`,
+    "o coordinator contou as publicações",
+    (stats?.messagesPublished ?? 0) > 0,
+    `${stats?.messagesPublished ?? 0} publicadas`,
+  );
+  record(
+    "os shards se desregistraram depois que todos desconectaram",
+    (stats?.registeredShards?.length ?? 0) === 0 && (stats?.connections ?? 0) === 0,
+    `${stats?.registeredShards?.length ?? 0} shards registrados, ${stats?.connections ?? 0} conexões`,
+  );
+
+  record(
+    "o run de carga foi anunciado e encerrado",
+    (await fetch(`${BASE}/api/rooms/${ROOM}/loadtest`).then((r) => r.json()))?.run === null,
+    "nenhum run ativo depois do fim",
   );
 
   return report;

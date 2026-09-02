@@ -9,3 +9,8 @@ MODERATOR_API_KEY="local-moderator-key"
 #CF_API_TOKEN=""
 #CF_ACCOUNT_ID=""
 #CF_SCRIPT_NAME="live-chat"
+
+# Opcional, e por padrão ausente de propósito: enquanto esta chave nao existe,
+# o bypass do limite de conexoes da borda nao existe. Ela e armada a mao logo
+# antes de um teste de carga e removida logo depois — veja docs/LOADTEST.md.
+#LOADTEST_BYPASS_KEY=""

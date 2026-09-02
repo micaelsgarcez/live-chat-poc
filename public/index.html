@@ -5,6 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="color-scheme" content="light" />
     <title>Real Oficial · Live Chat</title>
+    <!-- Preconnect first: the font is on the critical path for every line of
+         chat, and the two hosts are separate (CSS from one, the files from the
+         other). The range covers every weight the stylesheet asks for — 400
+         through 800; a weight left out would be synthesised into fake bold. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400..800&display=swap"
+    />
     <link rel="stylesheet" href="/styles.css" />
     <link rel="icon" href="/brand/realoficial.png" />
   </head>
@@ -159,6 +169,16 @@
               <div class="verdict__head" id="verdict-head">Verificando a sala…</div>
               <ul class="verdict__checks" id="verdict-checks"></ul>
             </div>
+          </div>
+
+          <!-- Only rendered while a load test is announced; see console.js. -->
+          <div class="card card--loadtest" id="loadtest" hidden>
+            <div class="card__head">
+              <h3 class="card__title">Teste de carga em andamento</h3>
+              <span class="card__note" id="loadtest-note"></span>
+            </div>
+            <div class="loadtest__bar"><div class="loadtest__fill" id="loadtest-fill"></div></div>
+            <div id="loadtest-body"></div>
           </div>
 
           <div class="tiles" id="tiles"></div>
@@ -327,6 +347,7 @@
             <svg aria-hidden="true"><use href="#i-gear" /></svg>
           </button>
           <span class="slow-pill" id="slow-pill" hidden></span>
+          <span class="slow-pill slow-pill--sampled" id="sample-pill" hidden></span>
           <span class="composer__count" id="char-count" aria-hidden="true"></span>
           <button class="btn" type="submit" form="composer" id="send-btn" disabled>Chat</button>
         </div>

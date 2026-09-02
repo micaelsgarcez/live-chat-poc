@@ -51,13 +51,25 @@ import {
   type ServerEvent,
   type ServerMessage,
 } from "../shared/protocol";
-import { defaultRoomConfig, toPublicConfig, type RoomConfig } from "../shared/room-config";
+import {
+  defaultRoomConfig,
+  normalizeRoomConfig,
+  toPublicConfig,
+  type RoomConfig,
+} from "../shared/room-config";
 import { gates } from "../features/registry";
 import { createMessageBuffer, listRoomMessages } from "../features/persistence";
 import { enqueueModeration } from "../features/moderation";
 import { AuditRing, type AuditInput, type ShardObservabilityReport } from "../features/observability";
 import { decidePresence, type PresenceSnapshot } from "./shard/presence";
 import { RecentMessages, RECENT_MESSAGE_WINDOW } from "./shard/recent-messages";
+import {
+  newViewerBudget,
+  planDelivery,
+  spendBudget,
+  type DeliveryPlan,
+  type ViewerBudget,
+} from "./shard/delivery";
 import {
   hasPersistableState,
   isExpiredSnapshot,
@@ -115,6 +127,14 @@ const MAX_UNREGISTER_ATTEMPTS = 5;
 
 export class ChatShard extends DurableObject<Env> implements ShardApi {
   private config: RoomConfig | null = null;
+  /**
+   * Per-socket delivery allowance. Keyed on the socket itself and weak on
+   * purpose: a budget is warm state, worth nothing after a hibernation, and
+   * must never be the reason a closed connection stays reachable.
+   */
+  private readonly budgets = new WeakMap<WebSocket, ViewerBudget>();
+  /** Chat messages this shard withheld from a viewer over its budget. */
+  private sampledOut = 0;
   private roomId = "";
   private shardIndex = 0;
   private buffer: MessageBuffer | null = null;
@@ -519,28 +539,53 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
         });
       }
     }
-    let payloads: string[];
+    const cap = this.config?.fanout.maxPerViewerPerSecond ?? 0;
+    const alwaysOwn = this.config?.fanout.alwaysDeliverOwn ?? true;
+
+    let plan: DeliveryPlan;
     try {
-      payloads = events.map(encode);
+      plan = planDelivery(events);
     } catch (error) {
       this.log.error("unencodable event", { error: String(error) });
       return 0;
     }
 
+    const now = Date.now();
     let delivered = 0;
+    let withheld = 0;
     for (const socket of this.ctx.getWebSockets()) {
-      let ok = true;
-      for (const payload of payloads) {
-        try {
-          socket.send(payload);
-        } catch {
-          // A dead socket must not cost the rest of the shard its delivery;
-          // the close handler cleans it up.
-          ok = false;
+      let granted = plan.chatCount;
+      if (cap > 0 && plan.chatCount > 0) {
+        let budget = this.budgets.get(socket);
+        if (!budget) {
+          budget = newViewerBudget(cap, now);
+          this.budgets.set(socket, budget);
         }
+        granted = spendBudget(budget, cap, plan.chatCount, now);
+        withheld += plan.chatCount - granted;
+      }
+
+      let ok = true;
+      try {
+        socket.send(plan.payloadFor(granted));
+        // Being sampled out of your own message would look like the room
+        // swallowed it, so the sender gets it on its own frame.
+        if (alwaysOwn && granted < plan.chatCount) {
+          const meta = socket.deserializeAttachment() as SocketAttachment | null;
+          if (meta) {
+            for (const own of plan.missingOwn(meta.identity.userId, granted)) {
+              socket.send(encode(own));
+            }
+          }
+        }
+      } catch {
+        // A dead socket must not cost the rest of the shard its delivery;
+        // the close handler cleans it up.
+        ok = false;
       }
       if (ok) delivered++;
     }
+    if (withheld > 0) this.sampledOut += withheld;
     return delivered;
   }
 
@@ -785,7 +830,8 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
         this.shardIndex = meta.shardIndex;
         this.registered = meta.registered;
       }
-      this.config = (stored.get(KEY_CONFIG) as RoomConfig | undefined) ?? null;
+      const storedConfig = stored.get(KEY_CONFIG) as RoomConfig | undefined;
+      this.config = storedConfig ? normalizeRoomConfig(storedConfig) : null;
       const counters = stored.get(KEY_COUNTERS) as ShardCounters | undefined;
       if (counters) {
         this.acceptedCount = counters.accepted;
@@ -823,7 +869,10 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
   }
 
   /** Applies a config unless it is older than the one already held. */
-  private async adoptConfig(next: RoomConfig): Promise<RoomConfig> {
+  private async adoptConfig(incoming: RoomConfig): Promise<RoomConfig> {
+    // The coordinator may be running an older deploy mid-rollout, so a config
+    // arriving over RPC is filled in the same way a stored one is.
+    const next = normalizeRoomConfig(incoming);
     const current = this.config;
     if (current && next.version < current.version) return current;
 

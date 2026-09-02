@@ -11,6 +11,7 @@ import type { RouteDef } from "../shared/http";
 import { authSlice } from "./auth";
 import { banSlice } from "./ban";
 import { connectSlice } from "./connect";
+import { loadTestSlice } from "./loadtest";
 import { moderationSlice, moderationGate } from "./moderation";
 import { observabilitySlice } from "./observability";
 import { persistenceSlice } from "./persistence";
@@ -35,6 +36,7 @@ export const slices: readonly Slice[] = [
   persistenceSlice,
   rankingSlice,
   observabilitySlice,
+  loadTestSlice,
 ];
 
 /**
