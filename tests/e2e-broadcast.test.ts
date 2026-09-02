@@ -3,8 +3,8 @@ import { TestClient } from "./helpers/client";
 
 describe("end-to-end broadcast", () => {
   it("delivers a message from one connection to every connection in the room", async () => {
-    const a = await TestClient.connect("e2e-room", "aaaaaaaa-user-one");
-    const b = await TestClient.connect("e2e-room", "bbbbbbbb-user-two");
+    const a = await TestClient.connectAs("e2e-room", "user-one");
+    const b = await TestClient.connectAs("e2e-room", "user-two");
 
     await Promise.all([a.waitFor("hello"), b.waitFor("hello")]);
 

@@ -26,6 +26,27 @@ export class TestClient {
     });
   }
 
+  /** Mints a local dev JWT via the frozen `POST /api/dev/token` route. */
+  static async token(userId: string, roles: string[] = []): Promise<string> {
+    const res = await SELF.fetch("https://example.com/api/dev/token", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId, roles }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { token: string };
+    return body.token;
+  }
+
+  /** Connects as `userId`, minting a token for it. */
+  static async connectAs(
+    room: string,
+    userId: string,
+    roles: string[] = [],
+  ): Promise<TestClient> {
+    return TestClient.connect(room, await TestClient.token(userId, roles));
+  }
+
   static async connect(
     room: string,
     token: string,
