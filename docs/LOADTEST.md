@@ -174,33 +174,57 @@ shard atende** e **com que frequência o laço roda**.
 
 #### O lever mais barato: a janela de coalescência
 
-Mesma carga (1.000 espectadores, 12 msg/s), só mudando `fanout.batchWindowMs`:
+Mesma carga (1.000 espectadores, 40 remetentes, 12 msg/s, 8 shards), só mudando
+`fanout.batchWindowMs`:
 
 | janela | ack p99 | entrega p99 | entregues/s |
 |---:|---:|---:|---:|
-| 100 ms | 621 ms | 622 ms | 2.675 |
-| **250 ms** | **395 ms** | 636 ms | 2.679 |
+| 100 ms | 601 ms | 607 ms | 2.686 |
+| 250 ms | 395 ms | 636 ms | 2.679 |
+| **500 ms** | **317 ms** | 803 ms | 2.671 |
 
-Uma linha de configuração, sem deploy: **−36% de latência de ack**, e o
-espectador não sente (a entrega ficou igual dentro do ruído). A janela mais
-larga roda o laço 2,5× menos vezes por segundo, e é exatamente o trabalho por
-socket que ela economiza.
+Uma linha de configuração, sem deploy, e a troca é explícita: **quem escreve
+espera quase metade**, e **quem assiste espera mais** — mas dentro do orçamento
+de 1 s. A janela larga roda o laço de fanout menos vezes por segundo, e é esse
+trabalho que ela economiza.
 
-#### O que isso diz sobre `MAX_SOCKETS_PER_SHARD`
+Escolha a janela pelo que a sala é. Chat de live é assimétrico: milhares assistem
+e dezenas escrevem, então gastar latência de entrega para comprar latência de
+envio é o câmbio certo.
 
-A latência é linear em sockets **por shard**: 50 por shard deram 232 ms, 125
-deram 621 ms. O padrão de 5.000 é, portanto, cedo demais para o autoescalador
-servir para alguma coisa — quando ele finalmente dispara, a sala já passou muito
-do ponto em que um espectador aguenta esperar.
+#### Mais shards **não** ajuda — e isso é o achado
 
-O número certo sai de um orçamento de latência, não de um limite de memória.
-`MAX_SOCKETS_PER_SHARD` é *variable* do repositório, então dá para ajustar sem
-tocar em nenhum arquivo congelado.
+A hipótese natural é que a latência venha de sockets por shard, e que dividir
+mais resolva. Medido, com as mesmas 1.000 conexões:
 
-> **Ressalva honesta:** parte do custo por socket medido acima era um defeito
-> nosso — o laço desserializava o attachment de cada socket a cada rodada. Isso
-> foi corrigido, mas **os números desta seção são anteriores à correção**. O
-> teto por shard precisa ser remedido antes de virar configuração.
+| shards | sockets por shard | ack p99 |
+|---:|---:|---:|
+| 8 | 126 | **601 ms** |
+| 20 | 53 | **922 ms** |
+
+Menos sockets por shard e a latência **piorou 53%**. O motivo está em
+`RoomCoordinator.fanout`: ele chama todos os shards e **espera todos**. A duração
+de uma rodada é o *máximo* entre eles, e o máximo de 20 amostras é pior que o de
+8. Cada shard a mais é mais uma chance de a rodada inteira esperar pelo mais
+lento.
+
+Ou seja: o limite estrutural não é o shard, é o coordinator esperar o shard mais
+lento. Dividir mais a sala só multiplica as chances de haver um lento.
+
+> **Duas coisas que este experimento também derrubou.** A primeira: o custo por
+> socket no laço de fanout não era o attachment — remover aquela desserialização
+> por socket por rodada mudou o ack de 601 ms para 601 ms, ou seja, nada. A
+> correção continua certa (era trabalho inútil), mas não era o gargalo, e dizer
+> que era seria inventar. A segunda: **`MAX_SOCKETS_PER_SHARD` não é o botão que
+> parecia ser** — se mais shards pioram, baixar o teto por shard piora junto.
+
+#### O que ainda não foi feito
+
+O coordinator soma `delivered` de cada shard para devolver um `PublishResult`
+que **o shard descarta**. Ele está se bloqueando no resultado de um trabalho que
+ninguém lê. Não esperar o fanout — ou dar a cada shard sua própria fila, para
+que um lento atrase só os próprios espectadores em vez da sala inteira — é a
+mudança que tira o teto do lugar. Não está feita.
 
 ## 4. Por que 50 mil pessoas escrevendo não é entregável — e o que se faz
 
