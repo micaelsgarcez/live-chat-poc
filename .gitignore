@@ -9,3 +9,7 @@ coverage/
 # gerados pelo pipeline
 wrangler.deploy.json
 .ci/
+
+# O video da demonstracao fica hospedado no GitHub (anexo), nao no historico:
+# 62 MB num repositorio de 3,6 MB seriam permanentes e so sairiam reescrevendo tudo.
+docs/*.mp4
