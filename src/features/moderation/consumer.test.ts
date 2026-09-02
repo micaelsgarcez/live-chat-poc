@@ -6,8 +6,12 @@ import { moderationConsumer } from "./consumer";
 import { MODERATION_QUEUE_NAME, parseModerationJob } from "./queue";
 import { applyLocalSchema, fakeBatch } from "./test-support";
 
-/** Trips several soft signals at once without needing a configured wordlist. */
-const SPAM = "FREE CRYPTO CLICK HERE http://bit.ly/a http://bit.ly/b http://bit.ly/c";
+/**
+ * Trips several soft signals of the async reviewer while still passing the
+ * synchronous gates — no links, no caps, no duplicates — which is exactly the
+ * case the asynchronous half exists for.
+ */
+const SPAM = "free crypto, click here to claim your prize today";
 
 async function seedMessage(roomId: string, id: string, userId: string, body: string) {
   await env.CHAT_DB.prepare(

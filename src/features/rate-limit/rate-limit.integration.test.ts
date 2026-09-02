@@ -22,7 +22,9 @@ describe("rate limit through a real shard", () => {
     expect(rejected.cid).toBe(`c${capacity}`);
     expect(rejected.retryAfterMs).toBeGreaterThan(0);
     expect(rejected.retryAfterMs).toBeLessThanOrEqual(1_000);
-    expect(client.all("ack")).toHaveLength(capacity);
+    // The shard acks only after the coordinator round trip, so an ack can land
+    // after the reject that was decided before it.
+    await vi.waitFor(() => expect(client.all("ack")).toHaveLength(capacity), { timeout: 5_000 });
 
     client.close();
   });
@@ -34,7 +36,8 @@ describe("rate limit through a real shard", () => {
     const total = capacity + 3;
     sendBurst(mod, total);
 
-    await vi.waitFor(() => expect(mod.all("ack")).toHaveLength(total));
+    // Each accepted message costs a coordinator round trip, so give the burst room.
+    await vi.waitFor(() => expect(mod.all("ack")).toHaveLength(total), { timeout: 5_000 });
     expect(mod.all("rejected")).toHaveLength(0);
 
     mod.close();

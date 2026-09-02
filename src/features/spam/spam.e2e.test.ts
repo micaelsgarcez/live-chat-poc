@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { TestClient } from "../../../tests/helpers/client";
 import { RejectCode } from "../../shared/errors";
 import { defaultRoomConfig } from "../../shared/room-config";
@@ -17,7 +17,11 @@ describe("spam over a live socket", () => {
     const rejected = await client.waitFor("rejected");
     expect(rejected.cid).toBe("dup");
     expect(rejected.code).toBe(RejectCode.SPAM);
-    expect(client.all("ack")).toHaveLength(maxDuplicates);
+    // Acks are sent after the coordinator round trip, so they can trail the
+    // reject that the gate decided synchronously.
+    await vi.waitFor(() => expect(client.all("ack")).toHaveLength(maxDuplicates), {
+      timeout: 5_000,
+    });
 
     client.close();
   });

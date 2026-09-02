@@ -266,7 +266,10 @@ describe("ChatShard RPC surface", () => {
     stats = await stub.getStats();
     expect(stats.acceptedCount).toBe(1);
     expect(stats.rejectedCount).toBe(1);
-    expect(stats.bufferedMessages).toBe(0);
+    // The accepted message waits in the persistence buffer until a flush.
+    expect(stats.bufferedMessages).toBe(1);
+    expect(await stub.flushNow()).toBe(1);
+    expect((await stub.getStats()).bufferedMessages).toBe(0);
   });
 
   it("drains the persistence buffer on flushNow and swallows a failing flush", async () => {
