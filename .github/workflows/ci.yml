@@ -25,9 +25,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -37,10 +37,14 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # `npm test`, não `npx vitest`: o hook `pretest` do package.json cria o
+      # .dev.vars, e sem ele os testes recebem os secrets como undefined. Passar
+      # pelo entrypoint do repositório é o que impede o CI de divergir do que
+      # roda na máquina de quem desenvolve.
       - name: Testes no runtime real do workerd
         run: |
           mkdir -p .ci
-          npx vitest run --reporter=default --reporter=json --outputFile.json=.ci/vitest-results.json
+          npm test -- --reporter=default --reporter=json --outputFile.json=.ci/vitest-results.json
 
       - name: Relatório por funcionalidade
         if: always()
@@ -48,7 +52,7 @@ jobs:
 
       - name: Guardar o resultado bruto
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: vitest-results
           path: .ci/vitest-results.json
@@ -60,9 +64,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -85,9 +89,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
