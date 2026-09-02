@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "wrangler dev --local --port 8787",
     "typecheck": "tsc --noEmit",
@@ -14,7 +16,10 @@
     "cf-typegen": "wrangler types --env-interface CloudflareBindings src/worker-configuration.d.ts",
     "seed:local": "node tools/seed/seed.mjs",
     "loadtest": "node tools/loadtest/run.mjs",
-    "check": "npm run typecheck && npm run test"
+    "check": "npm run typecheck && npm run test",
+    "predev": "node tools/ensure-dev-vars.mjs",
+    "pretest": "node tools/ensure-dev-vars.mjs",
+    "setup": "node tools/ensure-dev-vars.mjs && wrangler d1 migrations apply CHAT_DB --local"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",
