@@ -170,6 +170,18 @@ config.vars = {
     config.vars?.MAX_SOCKETS_PER_SHARD ?? "5000",
   ),
   LOG_LEVEL: optional("LOG_LEVEL", config.vars?.LOG_LEVEL ?? "info"),
+  // Analytics da conta, lido pelo console de observabilidade. Nenhum dos dois é
+  // segredo — o account tag aparece na URL de qualquer página do dashboard, e o
+  // nome do script está no próprio deploy. O token, que é segredo, vai por
+  // `wrangler secret put` depois da publicação, como os outros.
+  //
+  // O padrão do account tag é a conta em que este Worker está sendo publicado,
+  // que é justamente a conta cujos números interessam; `CF_ACCOUNT_ID` só
+  // existe para apontar para outra.
+  CF_ACCOUNT_ID: optional("CF_ACCOUNT_ID", optional("CLOUDFLARE_ACCOUNT_ID", "")),
+  // Segue o nome real do Worker: renomear o deploy sem renomear o filtro faria
+  // o card mostrar zeros em vez de dizer que não achou nada.
+  CF_SCRIPT_NAME: optional("CF_SCRIPT_NAME", workerName),
 };
 
 // The workers.dev URL is what the post-deploy check talks to, so it stays on
