@@ -4,20 +4,24 @@
  * OWNER CONTRACT:
  *   moderationSlice   : Slice (gate + `chat-moderation` consumer + mod routes)
  *   enqueueModeration : (env, jobs: ModerationJob[]) => Promise<void>
+ *   moderationGate    : MessageGate
  *
- * STUB.
+ * Two halves, on purpose. The gate is cheap and runs before the broadcast, so
+ * anything it catches is never seen by anyone. The queue consumer is allowed to
+ * be expensive because it runs after the fact, and pays for that with a
+ * retroactive `delete` event fanned out by the coordinator.
  */
-import type { Env } from "../../env";
 import type { Slice } from "../../shared/slice";
-import type { ModerationJob } from "../../shared/ports";
-import { allow, type MessageGate } from "../../shared/pipeline";
+import { moderationGate } from "./gate";
+import { moderationConsumer } from "./consumer";
+import { moderationRoutes } from "./routes";
 
-export async function enqueueModeration(_env: Env, _jobs: ModerationJob[]): Promise<void> {}
+export { moderationGate };
+export { enqueueModeration } from "./queue";
 
-export const moderationGate: MessageGate = {
-  name: "moderation-sync",
-  skipForPrivileged: false,
-  check: () => allow(),
+export const moderationSlice: Slice = {
+  name: "moderation",
+  gate: moderationGate,
+  routes: moderationRoutes,
+  queueConsumers: [moderationConsumer],
 };
-
-export const moderationSlice: Slice = { name: "moderation", gate: moderationGate };
