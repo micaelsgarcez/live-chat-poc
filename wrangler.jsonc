@@ -1,0 +1,85 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "live-chat",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": { "enabled": true },
+
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+
+  "durable_objects": {
+    "bindings": [
+      { "name": "ROOM_COORDINATOR", "class_name": "RoomCoordinator" },
+      { "name": "CHAT_SHARD", "class_name": "ChatShard" }
+    ]
+  },
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["RoomCoordinator", "ChatShard"]
+    }
+  ],
+
+  "kv_namespaces": [
+    { "binding": "CHAT_KV", "id": "live_chat_kv_local", "preview_id": "live_chat_kv_local" }
+  ],
+
+  "d1_databases": [
+    {
+      "binding": "CHAT_DB",
+      "database_name": "live-chat",
+      "database_id": "00000000-0000-0000-0000-000000000001",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "queues": {
+    "producers": [
+      { "binding": "PERSIST_QUEUE", "queue": "chat-persist" },
+      { "binding": "MODERATION_QUEUE", "queue": "chat-moderation" }
+    ],
+    "consumers": [
+      {
+        "queue": "chat-persist",
+        "max_batch_size": 100,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+        "dead_letter_queue": "chat-dlq"
+      },
+      {
+        "queue": "chat-moderation",
+        "max_batch_size": 25,
+        "max_batch_timeout": 2,
+        "max_retries": 3,
+        "dead_letter_queue": "chat-dlq"
+      },
+      {
+        "queue": "chat-dlq",
+        "max_batch_size": 25,
+        "max_batch_timeout": 10,
+        "max_retries": 1
+      }
+    ]
+  },
+
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+
+  "vars": {
+    "ENVIRONMENT": "local",
+    "JWT_ISSUER": "https://auth.local.test",
+    "JWT_AUDIENCE": "live-chat",
+    "JWT_ALG": "HS256",
+    "JWKS_URL": "",
+    "DEFAULT_SHARD_COUNT": "4",
+    "MAX_SOCKETS_PER_SHARD": "5000",
+    "LOG_LEVEL": "info"
+  }
+}

@@ -1,0 +1,3 @@
+# Copy to .dev.vars for local development (never commit .dev.vars)
+JWT_HS256_SECRET="local-dev-secret-change-me"
+MODERATOR_API_KEY="local-moderator-key"

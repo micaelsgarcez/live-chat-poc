@@ -1,0 +1,30 @@
+{
+  "name": "live-chat-cloudflare",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "dev": "wrangler dev --local --port 8787",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:migrate:local": "wrangler d1 migrations apply CHAT_DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply CHAT_DB --remote",
+    "cf-typegen": "wrangler types --env-interface CloudflareBindings src/worker-configuration.d.ts",
+    "seed:local": "node tools/seed/seed.mjs",
+    "loadtest": "node tools/loadtest/run.mjs",
+    "check": "npm run typecheck && npm run test"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@cloudflare/workers-types": "^5.20260902.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.128.0",
+    "ws": "^8.18.3"
+  },
+  "dependencies": {
+    "jose": "^6.2.10"
+  }
+}

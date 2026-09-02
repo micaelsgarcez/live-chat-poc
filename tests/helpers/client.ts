@@ -1,0 +1,78 @@
+import { SELF } from "cloudflare:test";
+import { expect } from "vitest";
+import type { ServerMessage } from "../../src/shared/protocol";
+
+/**
+ * WebSocket test client that buffers every frame from the moment the socket is
+ * accepted, so a test can await `hello` even though the server sends it during
+ * the upgrade.
+ */
+export class TestClient {
+  readonly received: ServerMessage[] = [];
+  private waiters: Array<{
+    predicate: (m: ServerMessage) => boolean;
+    resolve: (m: ServerMessage) => void;
+  }> = [];
+
+  constructor(readonly ws: WebSocket) {
+    ws.addEventListener("message", (event) => {
+      const parsed = JSON.parse(event.data as string) as ServerMessage;
+      this.received.push(parsed);
+      this.waiters = this.waiters.filter((waiter) => {
+        if (!waiter.predicate(parsed)) return true;
+        waiter.resolve(parsed);
+        return false;
+      });
+    });
+  }
+
+  static async connect(
+    room: string,
+    token: string,
+    init: RequestInit = {},
+  ): Promise<TestClient> {
+    const res = await SELF.fetch(`https://example.com/ws/${room}?token=${token}`, {
+      ...init,
+      headers: { Upgrade: "websocket", ...(init.headers ?? {}) },
+    });
+    expect(res.status).toBe(101);
+    const ws = res.webSocket!;
+    const client = new TestClient(ws);
+    ws.accept();
+    return client;
+  }
+
+  waitFor<T extends ServerMessage["t"]>(
+    t: T,
+    timeoutMs = 5000,
+  ): Promise<Extract<ServerMessage, { t: T }>> {
+    const found = this.received.find((m) => m.t === t);
+    if (found) return Promise.resolve(found as Extract<ServerMessage, { t: T }>);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`timeout waiting for "${t}"`)), timeoutMs);
+      this.waiters.push({
+        predicate: (m) => m.t === t,
+        resolve: (m) => {
+          clearTimeout(timer);
+          resolve(m as Extract<ServerMessage, { t: T }>);
+        },
+      });
+    });
+  }
+
+  all<T extends ServerMessage["t"]>(t: T): Array<Extract<ServerMessage, { t: T }>> {
+    return this.received.filter((m) => m.t === t) as Array<Extract<ServerMessage, { t: T }>>;
+  }
+
+  send(payload: unknown): void {
+    this.ws.send(JSON.stringify(payload));
+  }
+
+  close(): void {
+    try {
+      this.ws.close();
+    } catch {
+      /* already closed */
+    }
+  }
+}
