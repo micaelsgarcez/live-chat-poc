@@ -20,9 +20,15 @@ npm run setup          # cria .dev.vars e aplica as migrations no D1 local
 npm run dev            # http://127.0.0.1:8787
 ```
 
-Abra `http://127.0.0.1:8787` — o cliente de demonstração está lá: entra numa
-sala, pega um token de dev, conecta, envia, reage, vê presença, ranking e (como
-moderador) slow-mode, ban e delete retroativo.
+Abra `http://127.0.0.1:8787` — o cliente é uma réplica do chat do Twitch:
+nomes coloridos por usuário com o texto sempre em branco, menções com `@` (a
+sua destaca a mensagem inteira), respostas citando a mensagem original,
+seletor de emotes e stickers animados, e ações só de ícone com tooltip —
+responder e reagir para todo mundo, silenciar/apagar/banir só para moderador.
+
+> Os emotes são glifos Unicode. Num sistema sem fonte de emoji colorida eles
+> caem para o desenho monocromático da fonte; os stickers da aba GIFs são SVG
+> desenhado à mão e não dependem de fonte nenhuma.
 
 ```bash
 npm run check          # typecheck + 250 testes no runtime real do workerd
@@ -59,7 +65,7 @@ coordinator) recalcula o ranking para o KV.
 | GET | `/api/me` | identidade do token apresentado |
 | GET/PATCH | `/api/rooms/:roomId/config` | configuração da sala (PATCH = moderador) |
 | GET | `/api/rooms/:roomId/stats` | shards registrados, presença, contadores |
-| GET | `/api/rooms/:roomId/messages` | histórico paginado (`limit`, `before`) |
+| GET | `/api/rooms/:roomId/messages` | histórico paginado (`limit`, `before`), com a citação da resposta |
 | GET | `/api/rooms/:roomId/ranking` | ranking pronto do KV (`?refresh=1` recalcula) |
 | GET/POST | `/api/rooms/:roomId/bans` | listar / aplicar ban (moderador) |
 | DELETE | `/api/rooms/:roomId/bans/:userId` | remover ban |

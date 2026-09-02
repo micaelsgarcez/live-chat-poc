@@ -84,6 +84,7 @@ sem I/O, sem round-trip, testáveis sem Durable Object.
 | **Persistência** | buffer no shard → Queues → D1 | O shard **não** escreve no banco por mensagem. Acumula buffer em memória e manda em lote para `chat-persist`, que grava em D1 em batches. Trade-off consciente: não é persistência instantânea, mas evita transformar cada mensagem numa escrita síncrona. |
 | **Ranking** | Cron Trigger + KV | Não é calculado por mensagem. Um Worker com cron lê o acumulado de D1, recalcula (mais ativos, mais reagidos) e escreve o resultado pronto em KV; o frontend só lê. Desacopla o cálculo pesado do caminho quente. |
 | **Broadcast** | Worker → coordinator → shards | O fluxo central, e só acontece depois que a mensagem passou por todas as checagens acima. |
+| **Respostas** | shard (memória) + D1 | O cliente manda só o id da mensagem-pai. O shard resolve autor e trecho a partir da janela das últimas mensagens que ele viu passar no fanout — sem I/O no caminho quente e sem deixar ninguém forjar uma citação. O histórico refaz a citação com um self-join, então uma mensagem-pai apagada deixa de ser citada. |
 
 > **Nota sobre o cron:** o menor intervalo de Cron Trigger da Cloudflare é 1 minuto.
 > Para a janela de 10–30s citada no plano original, o refresh fino é disparado pelo

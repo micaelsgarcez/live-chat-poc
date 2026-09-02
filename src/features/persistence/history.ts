@@ -8,12 +8,23 @@ import type { Env } from "../../env";
 import { json, problem, type RouteDef } from "../../shared/http";
 import { messageIdTimestamp } from "../../shared/ids";
 import { err, ok, type Result } from "../../shared/result";
-import type { ChatMessage } from "../../shared/protocol";
+import { REPLY_EXCERPT_LENGTH, type ChatMessage } from "../../shared/protocol";
 
 export const DEFAULT_HISTORY_LIMIT = 50;
 export const MAX_HISTORY_LIMIT = 200;
 
-const SELECT_COLUMNS = "id, room_id, user_id, name, body, ts, masked";
+/**
+ * The parent of a reply is joined in rather than copied into the child row, so
+ * history quotes whatever the parent actually says today. A parent that was
+ * soft-deleted resolves to nothing, which is the same thing a client sees live
+ * when the reference has aged out of the shard's window.
+ */
+const SELECT_COLUMNS = `m.id, m.room_id, m.user_id, m.name, m.body, m.ts, m.masked,
+  m.reply_to,
+  p.user_id AS reply_user_id, p.name AS reply_name, p.body AS reply_body`;
+
+const FROM_WITH_PARENT = `FROM messages m
+  LEFT JOIN messages p ON p.id = m.reply_to AND p.deleted_at IS NULL`;
 
 interface MessageRow {
   id: string;
@@ -23,6 +34,10 @@ interface MessageRow {
   body: string;
   ts: number;
   masked: number;
+  reply_to: string | null;
+  reply_user_id: string | null;
+  reply_name: string | null;
+  reply_body: string | null;
 }
 
 /** Keyset cursor: `ts` alone is not unique, so the id breaks ties. */
@@ -49,6 +64,14 @@ function toChatMessage(row: MessageRow): ChatMessage {
   // `masked` and `roles` are optional in the protocol. Only `masked` survives
   // in D1 — roles belong to a live connection, not to history.
   if (row.masked) message.masked = true;
+  if (row.reply_to && row.reply_user_id && row.reply_name !== null && row.reply_body !== null) {
+    message.replyTo = {
+      id: row.reply_to,
+      userId: row.reply_user_id,
+      name: row.reply_name,
+      body: row.reply_body.slice(0, REPLY_EXCERPT_LENGTH),
+    };
+  }
   return message;
 }
 
@@ -91,14 +114,14 @@ export async function listRoomMessages(
   // Soft-deleted rows stay in D1 for moderation audits but must never be read
   // back — a retroactive delete has to hold on reload too.
   const where = cursor
-    ? "room_id = ? AND deleted_at IS NULL AND (ts < ? OR (ts = ? AND id < ?))"
-    : "room_id = ? AND deleted_at IS NULL";
+    ? "m.room_id = ? AND m.deleted_at IS NULL AND (m.ts < ? OR (m.ts = ? AND m.id < ?))"
+    : "m.room_id = ? AND m.deleted_at IS NULL";
   const bindings: Array<string | number> = cursor
     ? [roomId, cursor.ts, cursor.ts, cursor.id, limit]
     : [roomId, limit];
 
   const { results } = await env.CHAT_DB.prepare(
-    `SELECT ${SELECT_COLUMNS} FROM messages WHERE ${where} ORDER BY ts DESC, id DESC LIMIT ?`,
+    `SELECT ${SELECT_COLUMNS} ${FROM_WITH_PARENT} WHERE ${where} ORDER BY m.ts DESC, m.id DESC LIMIT ?`,
   )
     .bind(...bindings)
     .all<MessageRow>();
@@ -117,7 +140,7 @@ export async function getRoomMessage(
   messageId: string,
 ): Promise<ChatMessage | null> {
   const row = await env.CHAT_DB.prepare(
-    `SELECT ${SELECT_COLUMNS} FROM messages WHERE room_id = ? AND id = ? AND deleted_at IS NULL`,
+    `SELECT ${SELECT_COLUMNS} ${FROM_WITH_PARENT} WHERE m.room_id = ? AND m.id = ? AND m.deleted_at IS NULL`,
   )
     .bind(roomId, messageId)
     .first<MessageRow>();

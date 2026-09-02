@@ -19,8 +19,8 @@ export const PERSIST_QUEUE_NAME = "chat-persist";
 export const MAX_STATEMENTS_PER_BATCH = 20;
 
 const INSERT_MESSAGE = `INSERT OR IGNORE INTO messages
-  (id, room_id, user_id, name, body, ts, shard_index, masked)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+  (id, room_id, user_id, name, body, ts, shard_index, masked, reply_to)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 const INSERT_REACTION = `INSERT OR IGNORE INTO reactions
   (message_id, room_id, user_id, emoji, ts)
@@ -42,6 +42,7 @@ export async function writePersistBatch(env: Env, batch: PersistBatch): Promise<
         message.ts,
         batch.shardIndex,
         message.masked ? 1 : 0,
+        message.replyTo?.id ?? null,
       ),
     ),
     ...batch.reactions.map((reaction) =>

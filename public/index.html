@@ -1,182 +1,228 @@
 <!doctype html>
-<html lang="en" data-theme="auto">
+<html lang="pt-BR" data-theme="dark">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="light dark" />
-    <title>live-chat — demo client</title>
-    <link rel="stylesheet" href="./styles.css" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>Chat da live</title>
+    <link rel="stylesheet" href="/styles.css" />
     <link
       rel="icon"
-      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>💬</text></svg>"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%239147ff'/%3E%3Cpath d='M9 8h14v9l-4 4h-3l-3 3h-2v-3H9z' fill='%23fff'/%3E%3C/svg%3E"
     />
-    <script type="module" src="./app.js"></script>
   </head>
   <body>
-    <header class="topbar">
-      <div class="brand">
-        <h1>live-chat</h1>
-        <small>demo client</small>
+    <svg class="sprite" aria-hidden="true" focusable="false">
+      <defs>
+        <symbol id="i-reply" viewBox="0 0 20 20">
+          <path d="M8 5.5 3.5 10 8 14.5v-3h2.6c2.4 0 4.2 1 5.4 3 .2-4.9-1.8-7.6-5.9-7.9H8z" />
+        </symbol>
+        <symbol id="i-react" viewBox="0 0 20 20">
+          <path d="M10 2.6a7.4 7.4 0 1 0 5.1 12.8 7.4 7.4 0 0 0-5.1-12.8Zm0 1.7a5.7 5.7 0 1 1 0 11.4 5.7 5.7 0 0 1 0-11.4Z" />
+          <circle cx="7.7" cy="8.4" r="1.05" />
+          <circle cx="12.3" cy="8.4" r="1.05" />
+          <path d="M6.9 11.4h6.2a3.2 3.2 0 0 1-6.2 0Z" />
+        </symbol>
+        <symbol id="i-trash" viewBox="0 0 20 20">
+          <path d="M8 2.8h4a1 1 0 0 1 1 1v.9h3.2v1.7H3.8V4.7H7v-.9a1 1 0 0 1 1-1Zm-2.7 4.5h9.4l-.7 9a1.4 1.4 0 0 1-1.4 1.3H7.4A1.4 1.4 0 0 1 6 16.3l-.7-9Z" />
+        </symbol>
+        <symbol id="i-ban" viewBox="0 0 20 20">
+          <path d="M10 2.4a7.6 7.6 0 1 0 0 15.2 7.6 7.6 0 0 0 0-15.2Zm0 1.8c1.4 0 2.7.5 3.7 1.3l-8.2 8.2A5.8 5.8 0 0 1 10 4.2Zm0 11.6c-1.4 0-2.7-.5-3.7-1.3l8.2-8.2A5.8 5.8 0 0 1 10 15.8Z" />
+        </symbol>
+        <symbol id="i-timeout" viewBox="0 0 20 20">
+          <path d="M10 2.6a7.4 7.4 0 1 0 0 14.8 7.4 7.4 0 0 0 0-14.8Zm0 1.8a5.6 5.6 0 1 1 0 11.2 5.6 5.6 0 0 1 0-11.2Z" />
+          <path d="M9.15 6.1h1.7v4.25l3 1.75-.85 1.45-3.85-2.25Z" />
+        </symbol>
+        <symbol id="i-emote" viewBox="0 0 20 20">
+          <path d="M10 2.6a7.4 7.4 0 1 0 0 14.8 7.4 7.4 0 0 0 0-14.8Zm0 1.7a5.7 5.7 0 1 1 0 11.4 5.7 5.7 0 0 1 0-11.4Z" />
+          <circle cx="7.7" cy="8.4" r="1.05" />
+          <circle cx="12.3" cy="8.4" r="1.05" />
+          <path d="M6.9 11.4h6.2a3.2 3.2 0 0 1-6.2 0Z" />
+        </symbol>
+        <symbol id="i-gear" viewBox="0 0 20 20">
+          <path d="M8.7 2.5h2.6l.3 1.9 1.3.7 1.8-.8 1.3 2.3-1.4 1.3v1.5l1.4 1.3-1.3 2.3-1.8-.8-1.3.7-.3 1.9H8.7l-.3-1.9-1.3-.7-1.8.8-1.3-2.3 1.4-1.3V7.9L4 6.6l1.3-2.3 1.8.8 1.3-.7ZM10 7.7a2.3 2.3 0 1 0 0 4.6 2.3 2.3 0 0 0 0-4.6Z" />
+        </symbol>
+        <symbol id="i-users" viewBox="0 0 20 20">
+          <path d="M7.2 9.6a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm0 1.4c-2.6 0-4.7 1.4-4.7 3.2v1.6h9.4v-1.6c0-1.8-2.1-3.2-4.7-3.2Zm6.4-1.6a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Zm.2 1.5c-.6 0-1.2.1-1.7.3 1 .8 1.6 1.9 1.6 3v1.6h4v-1.5c0-1.7-1.8-3.4-3.9-3.4Z" />
+        </symbol>
+        <symbol id="i-collapse" viewBox="0 0 20 20">
+          <path d="M12.4 4.3 6.7 10l5.7 5.7 1.3-1.3L9.3 10l4.4-4.4z" />
+        </symbol>
+        <symbol id="i-search" viewBox="0 0 20 20">
+          <path d="M8.9 3a5.9 5.9 0 1 0 3.6 10.6l3 3 1.3-1.3-3-3A5.9 5.9 0 0 0 8.9 3Zm0 1.8a4.1 4.1 0 1 1 0 8.2 4.1 4.1 0 0 1 0-8.2Z" />
+        </symbol>
+        <symbol id="i-close" viewBox="0 0 20 20">
+          <path d="M5.7 4.4 10 8.7l4.3-4.3 1.3 1.3L11.3 10l4.3 4.3-1.3 1.3L10 11.3l-4.3 4.3-1.3-1.3L8.7 10 4.4 5.7z" />
+        </symbol>
+        <symbol id="i-pin" viewBox="0 0 20 20">
+          <path d="M12.2 2.5 17.5 7.8l-1.3 1.3-.8-.3-2.7 2.7.4 2.6-1.2 1.2-3.1-3.1-3.9 3.9-.9-.9 3.9-3.9-3.1-3.1L6 7l2.6.4L11.3 4.6l-.3-.8z" />
+        </symbol>
+        <symbol id="i-crown" viewBox="0 0 20 20">
+          <path d="M3 6.2 6.4 9 10 3.6 13.6 9 17 6.2l-1.4 8.6H4.4Zm1.4 10h11.2v1.8H4.4Z" />
+        </symbol>
+        <symbol id="i-chevron" viewBox="0 0 20 20">
+          <path d="M5.7 7.4 10 11.7l4.3-4.3 1.3 1.3-5.6 5.6-5.6-5.6z" />
+        </symbol>
+      </defs>
+    </svg>
+
+    <main class="chat" aria-label="Chat da live">
+      <header class="chat__head">
+        <button class="icon-btn" type="button" id="leave-btn" data-tip="Sair da sala" aria-label="Sair da sala">
+          <svg aria-hidden="true"><use href="#i-collapse" /></svg>
+        </button>
+        <h1 class="chat__title">Chat da live</h1>
+        <span class="viewers" id="viewers" data-tip="Pessoas conectadas na sala">
+          <svg aria-hidden="true"><use href="#i-users" /></svg>
+          <span id="viewers-count">—</span>
+        </span>
+      </header>
+
+      <div class="leaderboard" id="leaderboard" hidden>
+        <svg class="leaderboard__crown" aria-hidden="true"><use href="#i-crown" /></svg>
+        <ol class="leaderboard__list" id="leaderboard-list" aria-label="Quem mais falou nos últimos 15 minutos"></ol>
       </div>
-      <div class="grow"></div>
-      <p id="conn-status" class="status" role="status" data-state="offline">disconnected</p>
-      <button id="theme-toggle" type="button" aria-label="Colour theme: follow system">
-        theme: auto
+
+      <div class="pinned" id="pinned" hidden>
+        <svg class="pinned__icon" aria-hidden="true"><use href="#i-pin" /></svg>
+        <div class="pinned__text">
+          <span class="pinned__label">Regras da sala</span>
+          <span class="pinned__body" id="pinned-body"></span>
+        </div>
+      </div>
+
+      <ol class="stream" id="stream" aria-live="polite" aria-relevant="additions" tabindex="0">
+        <li class="stream__empty" id="stream-empty">Entre na sala para acompanhar o chat.</li>
+      </ol>
+
+      <button class="jump" id="jump" type="button" hidden>
+        Mensagens novas
+        <svg aria-hidden="true"><use href="#i-chevron" /></svg>
       </button>
-    </header>
 
-    <div class="app">
-      <!-- ---------------------------------------------------------- -->
-      <!-- left column: join + session facts                          -->
-      <!-- ---------------------------------------------------------- -->
-      <div class="column">
-        <section class="card" aria-labelledby="join-title">
-          <h2 id="join-title">Join a room</h2>
-          <form id="join-form">
-            <div class="field">
-              <label for="room-input">Room</label>
-              <input id="room-input" name="room" type="text" value="demo" autocomplete="off"
-                required maxlength="64" />
-            </div>
-            <div class="field">
-              <label for="name-input">Nickname</label>
-              <input id="name-input" name="name" type="text" autocomplete="off" required
-                maxlength="40" placeholder="ada" />
-            </div>
-            <div class="checkbox">
-              <input id="mod-input" name="moderator" type="checkbox" />
-              <label for="mod-input">Join with the <code>moderator</code> role</label>
-            </div>
-            <div class="row">
-              <button id="connect-btn" class="primary" type="submit">Connect</button>
-              <button id="disconnect-btn" type="button" disabled>Disconnect</button>
-            </div>
-          </form>
-          <p id="join-hint" class="hint">
-            A dev token is minted through <code>POST /api/dev/token</code>.
-          </p>
-        </section>
+      <div class="composer">
+        <div class="reply-chip" id="reply-chip" hidden>
+          <svg aria-hidden="true"><use href="#i-reply" /></svg>
+          <span class="reply-chip__text">Respondendo a <b id="reply-chip-name"></b></span>
+          <button class="icon-btn icon-btn--sm" type="button" id="reply-cancel" data-tip="Cancelar resposta" aria-label="Cancelar resposta">
+            <svg aria-hidden="true"><use href="#i-close" /></svg>
+          </button>
+        </div>
 
-        <section class="card" aria-labelledby="session-title">
-          <h2 id="session-title">Session</h2>
-          <dl class="facts">
-            <dt>User</dt>
-            <dd id="fact-user">—</dd>
-            <dt>Roles</dt>
-            <dd id="fact-roles">—</dd>
-            <dt>Shard</dt>
-            <dd id="fact-shard">—</dd>
-            <dt>Online</dt>
-            <dd id="fact-presence">—</dd>
-            <dt>Slow mode</dt>
-            <dd id="fact-slowmode">—</dd>
-            <dt>Max length</dt>
-            <dd id="fact-maxlen">—</dd>
-            <dt>Config v.</dt>
-            <dd id="fact-configversion">—</dd>
-            <dt>Ping</dt>
-            <dd id="fact-ping">—</dd>
-          </dl>
-        </section>
-      </div>
+        <div class="notice" id="notice" hidden></div>
 
-      <!-- ---------------------------------------------------------- -->
-      <!-- centre column: the chat itself                             -->
-      <!-- ---------------------------------------------------------- -->
-      <div class="column column-chat">
-        <section class="card chat" aria-labelledby="chat-title">
-          <div class="chat-head">
-            <h2 id="chat-title">Messages</h2>
-            <div class="grow"></div>
-            <span id="room-badge" class="badge">no room</span>
-            <span id="slowmode-badge" class="badge" data-tone="warn" hidden>slow mode</span>
-            <span id="closed-badge" class="badge" data-tone="warn" hidden>room closed</span>
-          </div>
-
-          <ul
-            id="messages"
-            class="messages"
-            role="log"
-            aria-live="polite"
-            aria-relevant="additions text"
-            aria-label="Chat messages"
+        <form class="composer__box" id="composer" autocomplete="off">
+          <label class="sr-only" for="body-input">Mensagem</label>
+          <textarea
+            id="body-input"
+            rows="1"
+            placeholder="Envie uma mensagem"
+            maxlength="500"
+            disabled
+          ></textarea>
+          <button
+            class="icon-btn composer__emote"
+            type="button"
+            id="picker-btn"
+            data-tip="Emotes e GIFs"
+            aria-label="Emotes e GIFs"
+            aria-expanded="false"
+            disabled
           >
-            <li class="empty" id="messages-empty">Not connected yet.</li>
-          </ul>
+            <svg aria-hidden="true"><use href="#i-emote" /></svg>
+          </button>
 
-          <form id="composer" class="composer">
-            <div class="field">
-              <label class="visually-hidden" for="body-input">Message</label>
-              <textarea id="body-input" name="body" rows="1" autocomplete="off"
-                placeholder="Say something… (Shift+Enter for a new line)"
-                disabled></textarea>
-            </div>
-            <div class="field">
-              <label class="visually-hidden" for="emoji-select">Reaction emoji</label>
-              <select id="emoji-select" name="emoji">
-                <option value="👍">👍</option>
-                <option value="❤️">❤️</option>
-                <option value="😂">😂</option>
-                <option value="🔥">🔥</option>
-                <option value="🎉">🎉</option>
-              </select>
-            </div>
-            <button id="send-btn" class="primary" type="submit" disabled>Send</button>
-          </form>
-        </section>
+          <div class="mention-menu" id="mention-menu" hidden role="listbox" aria-label="Marcar alguém"></div>
+        </form>
+
+        <div class="composer__foot">
+          <button class="icon-btn" type="button" id="settings-btn" data-tip="Configurações da sala" aria-label="Configurações da sala" aria-expanded="false">
+            <svg aria-hidden="true"><use href="#i-gear" /></svg>
+          </button>
+          <span class="slow-pill" id="slow-pill" hidden></span>
+          <span class="composer__count" id="char-count" aria-hidden="true"></span>
+          <button class="btn" type="submit" form="composer" id="send-btn" disabled>Chat</button>
+        </div>
       </div>
 
-      <!-- ---------------------------------------------------------- -->
-      <!-- right column: ranking + moderator tools                    -->
-      <!-- ---------------------------------------------------------- -->
-      <div class="column">
-        <section class="card" aria-labelledby="ranking-title">
-          <h2 id="ranking-title">Ranking</h2>
-          <ol id="ranking-list" class="ranking" aria-live="polite"></ol>
-          <p id="ranking-hint" class="hint">Connect to load the ranking.</p>
-          <p class="hint">
-            <button id="ranking-refresh" type="button" disabled>Refresh ranking</button>
-          </p>
-        </section>
+      <!-- emote / gif picker ------------------------------------------------>
+      <section class="picker" id="picker" hidden aria-label="Emotes e GIFs">
+        <div class="picker__search">
+          <svg aria-hidden="true"><use href="#i-search" /></svg>
+          <label class="sr-only" for="picker-search">Buscar emotes</label>
+          <input id="picker-search" type="search" placeholder="Buscar emotes" />
+          <button class="icon-btn icon-btn--sm" type="button" id="picker-close" data-tip="Fechar" aria-label="Fechar">
+            <svg aria-hidden="true"><use href="#i-close" /></svg>
+          </button>
+        </div>
 
-        <section class="card" id="mod-panel" aria-labelledby="mod-title" hidden>
-          <h2 id="mod-title">Moderator</h2>
+        <div class="picker__tabs" role="tablist" aria-label="Tipo de mídia">
+          <button class="tab is-active" type="button" role="tab" id="tab-emotes" aria-selected="true" data-tab="emotes">Emotes</button>
+          <button class="tab" type="button" role="tab" id="tab-gifs" aria-selected="false" data-tab="gifs">GIFs</button>
+        </div>
 
-          <div class="field">
-            <label for="slowmode-input">Slow mode (seconds)</label>
-            <input id="slowmode-input" type="number" min="0" max="300" step="1" value="0" />
-          </div>
-          <div class="checkbox">
+        <div class="picker__body">
+          <div class="picker__scroll" id="picker-scroll"></div>
+          <nav class="picker__rail" id="picker-rail" aria-label="Categorias"></nav>
+        </div>
+      </section>
+
+      <!-- room settings ----------------------------------------------------->
+      <section class="sheet" id="settings" hidden aria-label="Configurações da sala">
+        <header class="sheet__head">
+          <h2>Configurações</h2>
+          <button class="icon-btn icon-btn--sm" type="button" id="settings-close" data-tip="Fechar" aria-label="Fechar">
+            <svg aria-hidden="true"><use href="#i-close" /></svg>
+          </button>
+        </header>
+
+        <dl class="facts">
+          <dt>Você</dt><dd id="fact-user">—</dd>
+          <dt>Shard</dt><dd id="fact-shard">—</dd>
+          <dt>Latência</dt><dd id="fact-ping">—</dd>
+          <dt>Config</dt><dd id="fact-config">—</dd>
+        </dl>
+
+        <form class="mod" id="mod-form" hidden>
+          <h3>Moderação</h3>
+          <label class="field">
+            <span>Modo lento (segundos)</span>
+            <input id="slowmode-input" type="number" min="0" max="600" step="1" value="0" />
+          </label>
+          <label class="check">
             <input id="closed-input" type="checkbox" />
-            <label for="closed-input">Close the room</label>
-          </div>
-          <div class="row">
-            <button id="config-apply" type="button">Apply configuration</button>
-          </div>
+            <span>Fechar a sala</span>
+          </label>
+          <button class="btn btn--quiet" type="submit" id="config-apply">Aplicar</button>
+        </form>
 
-          <div class="field" style="margin-top: 14px">
-            <label for="ban-user-input">Ban user id</label>
-            <input id="ban-user-input" type="text" autocomplete="off" placeholder="user-42" />
-          </div>
-          <div class="field">
-            <label for="ban-reason-input">Ban reason</label>
-            <input id="ban-reason-input" type="text" autocomplete="off" placeholder="spam" />
-          </div>
-          <div class="row">
-            <button id="ban-apply" type="button">Ban</button>
-          </div>
+        <p class="sheet__hint" id="settings-hint"></p>
+      </section>
 
-          <div class="field" style="margin-top: 14px">
-            <label for="delete-id-input">Delete message id</label>
-            <input id="delete-id-input" type="text" autocomplete="off" placeholder="msg id" />
-          </div>
-          <div class="row">
-            <button id="delete-apply" type="button">Delete message</button>
-          </div>
+      <!-- join --------------------------------------------------------------->
+      <section class="join" id="join" aria-label="Entrar na sala">
+        <form id="join-form" autocomplete="off">
+          <h2>Entrar no chat</h2>
+          <label class="field">
+            <span>Sala</span>
+            <input id="room-input" value="demo" required maxlength="60" />
+          </label>
+          <label class="field">
+            <span>Apelido</span>
+            <input id="name-input" required maxlength="24" />
+          </label>
+          <label class="check">
+            <input id="mod-input" type="checkbox" />
+            <span>Entrar como moderador</span>
+          </label>
+          <button class="btn btn--wide" type="submit" id="connect-btn">Conectar</button>
+          <p class="join__hint" id="join-hint">O token é gerado localmente pelo Worker.</p>
+        </form>
+      </section>
+    </main>
 
-          <p id="mod-hint" class="hint" role="status"></p>
-        </section>
-      </div>
-    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+    <script type="module" src="/app.js"></script>
   </body>
 </html>

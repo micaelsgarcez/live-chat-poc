@@ -22,6 +22,12 @@ export interface ClientSend {
   /** Client-generated correlation id, echoed back on ack/reject. */
   cid: string;
   body: string;
+  /**
+   * Id of the message being replied to. Only the id travels: the shard
+   * resolves the author and the excerpt from what it has actually seen, so a
+   * client cannot put words in someone else's mouth.
+   */
+  replyTo?: string;
 }
 
 export interface ClientReact {
@@ -42,6 +48,17 @@ export type ClientMessage = ClientSend | ClientReact | ClientPing;
 /* server -> client                                                    */
 /* ------------------------------------------------------------------ */
 
+/** Server-resolved excerpt of the message a reply points at. */
+export interface ReplyRef {
+  id: string;
+  userId: string;
+  name: string;
+  /** Truncated to `REPLY_EXCERPT_LENGTH`; it is a hint, not the message. */
+  body: string;
+}
+
+export const REPLY_EXCERPT_LENGTH = 120;
+
 export interface ChatMessage {
   id: string;
   roomId: string;
@@ -52,6 +69,8 @@ export interface ChatMessage {
   /** Set when a sync moderation gate rewrote the body instead of blocking it. */
   masked?: boolean;
   roles?: string[];
+  /** Absent when the parent is older than what the shard still remembers. */
+  replyTo?: ReplyRef;
 }
 
 export interface ServerHello {
@@ -178,9 +197,14 @@ export function parseClientMessage(raw: unknown): ClientMessage | null {
   if (typeof parsed !== "object" || parsed === null) return null;
   const msg = parsed as Record<string, unknown>;
   switch (msg.t) {
-    case "send":
+    case "send": {
       if (typeof msg.cid !== "string" || typeof msg.body !== "string") return null;
-      return { t: "send", cid: msg.cid.slice(0, 64), body: msg.body };
+      const send: ClientSend = { t: "send", cid: msg.cid.slice(0, 64), body: msg.body };
+      if (typeof msg.replyTo === "string" && msg.replyTo.length > 0) {
+        send.replyTo = msg.replyTo.slice(0, 64);
+      }
+      return send;
+    }
     case "react":
       if (
         typeof msg.cid !== "string" ||

@@ -56,6 +56,7 @@ import { gates } from "../features/registry";
 import { createMessageBuffer } from "../features/persistence";
 import { enqueueModeration } from "../features/moderation";
 import { decidePresence, type PresenceSnapshot } from "./shard/presence";
+import { RecentMessages } from "./shard/recent-messages";
 import {
   hasPersistableState,
   isExpiredSnapshot,
@@ -111,6 +112,8 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
   private shardIndex = 0;
   private buffer: MessageBuffer | null = null;
   private readonly userState = new Map<string, UserGateState>();
+  /** Window used to resolve a reply without I/O; see `recent-messages.ts`. */
+  private readonly recent = new RecentMessages();
   /** Users whose state changed since the last storage write. */
   private readonly dirtyUsers = new Set<string>();
   private acceptedCount = 0;
@@ -315,6 +318,9 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
       ts: now,
       roles: meta.identity.roles.length ? meta.identity.roles : undefined,
     };
+    // Resolved from what this shard saw, never from what the client claimed.
+    const replyTo = this.recent.resolve(parsed.replyTo);
+    if (replyTo) message.replyTo = replyTo;
 
     // Shadowed messages are accepted for the sender and go no further: no
     // broadcast, no persistence, no moderation job.
@@ -421,6 +427,10 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
   /** Returns how many sockets received the whole batch. */
   async fanout(events: ServerEvent[]): Promise<number> {
     if (events.length === 0) return 0;
+    for (const event of events) {
+      if (event.t === "msg") this.recent.remember(event.m);
+      else if (event.t === "delete") this.recent.forget(event.ids);
+    }
     let payloads: string[];
     try {
       payloads = events.map(encode);
