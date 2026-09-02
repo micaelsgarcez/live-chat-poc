@@ -53,10 +53,10 @@ import {
 } from "../shared/protocol";
 import { defaultRoomConfig, toPublicConfig, type RoomConfig } from "../shared/room-config";
 import { gates } from "../features/registry";
-import { createMessageBuffer } from "../features/persistence";
+import { createMessageBuffer, listRoomMessages } from "../features/persistence";
 import { enqueueModeration } from "../features/moderation";
 import { decidePresence, type PresenceSnapshot } from "./shard/presence";
-import { RecentMessages } from "./shard/recent-messages";
+import { RecentMessages, RECENT_MESSAGE_WINDOW } from "./shard/recent-messages";
 import {
   hasPersistableState,
   isExpiredSnapshot,
@@ -319,7 +319,7 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
       roles: meta.identity.roles.length ? meta.identity.roles : undefined,
     };
     // Resolved from what this shard saw, never from what the client claimed.
-    const replyTo = this.recent.resolve(parsed.replyTo);
+    const replyTo = await this.resolveReply(meta.roomId, parsed.replyTo);
     if (replyTo) message.replyTo = replyTo;
 
     // Shadowed messages are accepted for the sender and go no further: no
@@ -425,6 +425,22 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
   /* ---------------------------------------------------------------- */
 
   /** Returns how many sockets received the whole batch. */
+  /**
+   * A reply names its parent by id only. Normally the window answers from
+   * memory; after an eviction it is rebuilt from stored history once, so a
+   * quote does not silently disappear just because the isolate restarted.
+   */
+  private async resolveReply(roomId: string, parentId: string | undefined) {
+    if (!parentId) return undefined;
+    const known = this.recent.resolve(parentId);
+    if (known || this.recent.hydrated) return known;
+    await this.recent.hydrate(async () => {
+      const page = await listRoomMessages(this.env, roomId, RECENT_MESSAGE_WINDOW, null);
+      return page.messages;
+    });
+    return this.recent.resolve(parentId);
+  }
+
   async fanout(events: ServerEvent[]): Promise<number> {
     if (events.length === 0) return 0;
     for (const event of events) {

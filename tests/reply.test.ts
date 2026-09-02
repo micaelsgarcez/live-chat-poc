@@ -1,5 +1,6 @@
 import { SELF } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
+import { runInDurableObject } from "cloudflare:test";
 import { TestClient } from "./helpers/client";
 import { getShardCount, selectShardIndex } from "../src/features/routing";
 import { shardName } from "../src/shared/ids";
@@ -76,6 +77,68 @@ describe("replies", () => {
 
     user.close();
   }, 25_000);
+
+  it("resolves a reply to the sender's own previous message", async () => {
+    const user = await TestClient.connectAs(ROOM, "erin");
+    await user.waitFor("hello");
+
+    user.send({ t: "send", cid: "s1", body: "vou responder a mim mesmo" });
+    const parent = await user.waitFor("ack");
+    await vi.waitFor(() => {
+      expect(user.all("msg").some((m) => m.m.id === parent.id)).toBe(true);
+    });
+
+    user.send({ t: "send", cid: "s2", body: "e aqui esta", replyTo: parent.id });
+    const echoed = await vi.waitFor(async () => {
+      const found = user.all("msg").find((m) => m.m.body === "e aqui esta");
+      expect(found).toBeDefined();
+      return found!;
+    });
+
+    expect(echoed.m.replyTo).toMatchObject({
+      id: parent.id,
+      userId: "erin",
+      body: "vou responder a mim mesmo",
+    });
+
+    user.close();
+  }, 20_000);
+
+  it("rebuilds the quote from history after the shard lost its window", async () => {
+    const user = await TestClient.connectAs(ROOM, "frank");
+    await user.waitFor("hello");
+
+    user.send({ t: "send", cid: "w1", body: "esta mensagem vai para o D1" });
+    const parent = await user.waitFor("ack");
+
+    // Push it to D1 and then wipe the shard's in-memory window, which is what
+    // an evicted isolate leaves behind.
+    const shard = await shardFor("frank");
+    await shard.flushNow();
+    await vi.waitFor(
+      async () => {
+        const row = await env.CHAT_DB.prepare("SELECT id FROM messages WHERE id = ?")
+          .bind(parent.id)
+          .first();
+        expect(row).not.toBeNull();
+      },
+      { timeout: 10_000, interval: 200 },
+    );
+    await runInDurableObject(shard, (instance: ChatShard) => {
+      const internals = instance as unknown as { recent: { seen: Map<string, unknown> } };
+      internals.recent.seen.clear();
+    });
+
+    user.send({ t: "send", cid: "w2", body: "citando depois da queda", replyTo: parent.id });
+    const echoed = await vi.waitFor(async () => {
+      const found = user.all("msg").find((m) => m.m.body === "citando depois da queda");
+      expect(found).toBeDefined();
+      return found!;
+    });
+    expect(echoed.m.replyTo).toMatchObject({ body: "esta mensagem vai para o D1" });
+
+    user.close();
+  }, 30_000);
 
   it("drops the reference when the parent is unknown", async () => {
     const user = await TestClient.connectAs(ROOM, "dave");

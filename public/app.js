@@ -29,6 +29,8 @@ const TOKEN_REFRESH_MARGIN_MS = 60_000;
 const RECENT_EMOTES_KEY = "live-chat-recent-emotes";
 const QUICK_REACTIONS = ["❤️", "😂", "😮", "🔥", "👏", "💀"];
 const PRIVILEGED_ROLES = ["moderator", "admin", "system"];
+/** One room for the demo; the link is all anyone needs to start watching. */
+const ROOM_ID = "demo";
 
 const REJECT_LABELS = {
   unauthenticated: "você não está autenticado",
@@ -99,9 +101,11 @@ const dom = {
   modForm: $("mod-form"),
   slowModeInput: $("slowmode-input"),
   closedInput: $("closed-input"),
+  gate: $("gate"),
+  gateBtn: $("gate-btn"),
   join: $("join"),
+  joinClose: $("join-close"),
   joinForm: $("join-form"),
-  room: $("room-input"),
   name: $("name-input"),
   moderator: $("mod-input"),
   connect: $("connect-btn"),
@@ -130,6 +134,8 @@ const session = {
   replyTo: null,
   pickerTab: "emotes",
   pickerGroup: "channel",
+  /** Watching without a nickname: the stream is readable, the composer is not. */
+  anonymous: true,
 };
 
 const rows = { byCid: new Map(), byId: new Map() };
@@ -593,7 +599,11 @@ function onHello(msg) {
   dom.factShard.textContent = `#${msg.shardIndex}`;
   dom.modForm.hidden = !isPrivileged();
   dom.join.hidden = true;
-  systemLine(`Você entrou em "${msg.roomId}" pelo shard #${msg.shardIndex}.`);
+  dom.leaveBtn.classList.toggle("is-invisible", session.anonymous);
+  applyGate();
+  if (!session.anonymous) {
+    systemLine(`Você entrou como ${msg.name}.`);
+  }
   refreshRanking();
   loadHistory();
 }
@@ -811,13 +821,13 @@ async function loadHistory() {
 /* ------------------------------------------------------------------ */
 
 async function mintToken() {
-  const roles = dom.moderator.checked ? ["moderator"] : [];
-  const name = dom.name.value.trim() || "convidado";
+  const roles = session.anonymous || !dom.moderator.checked ? [] : ["moderator"];
+  const name = session.anonymous ? "Anônimo" : dom.name.value.trim() || "convidado";
   const result = await api("POST", "/api/dev/token", {
     body: { userId: session.userId || name, name, roles },
   });
   if (!result.ok || !result.data?.token) {
-    setHint(dom.joinHint, `token não gerado — ${apiErrorText(result, "falhou")}`, "error");
+    setHint(dom.joinHint, `não foi possível entrar — ${apiErrorText(result, "falhou")}`, "error");
     return false;
   }
   session.token = result.data.token;
@@ -834,9 +844,20 @@ function socketUrl() {
 }
 
 function setComposerEnabled(enabled) {
-  dom.body.disabled = !enabled;
-  dom.send.disabled = !enabled;
-  dom.pickerBtn.disabled = !enabled;
+  const allowed = enabled && !session.anonymous;
+  dom.body.disabled = !allowed;
+  dom.send.disabled = !allowed;
+  dom.pickerBtn.disabled = !allowed;
+}
+
+/** Anonymous: show the nickname gate instead of the input. */
+function applyGate() {
+  dom.gate.hidden = !session.anonymous;
+  dom.composer.hidden = session.anonymous;
+  dom.charCount.hidden = session.anonymous;
+  dom.send.hidden = session.anonymous;
+  dom.slowPill.hidden = session.anonymous || !(session.config?.slowModeMs > 0);
+  setComposerEnabled(session.ws?.readyState === WebSocket.OPEN);
 }
 
 async function openSocket() {
@@ -858,17 +879,22 @@ async function openSocket() {
   }
   session.ws = ws;
 
-  ws.addEventListener("message", (event) => dispatch(event.data));
+  ws.addEventListener("message", (event) => {
+    if (session.ws === ws) dispatch(event.data);
+  });
 
   ws.addEventListener("open", () => {
     session.attempt = 0;
     setNotice("");
     setComposerEnabled(true);
+    applyGate();
     startPing();
     startRankingRefresh();
   });
 
   ws.addEventListener("close", (event) => {
+    // A socket we replaced on purpose (signing in, signing out) is not a drop.
+    if (session.ws !== ws) return;
     stopPing();
     stopRankingRefresh();
     session.ws = null;
@@ -879,7 +905,9 @@ async function openSocket() {
   });
 
   // The close event always follows an error and owns the reconnect decision.
-  ws.addEventListener("error", () => setNotice("Erro de conexão.", "error"));
+  ws.addEventListener("error", () => {
+    if (session.ws === ws) setNotice("Erro de conexão.", "error");
+  });
 }
 
 function scheduleReconnect() {
@@ -909,7 +937,32 @@ function stopPing() {
   session.pingTimer = 0;
 }
 
-function leaveRoom() {
+function resetStream() {
+  rows.byCid.clear();
+  rows.byId.clear();
+  chatters.clear();
+  dom.stream.replaceChildren();
+}
+
+/**
+ * Opens the socket for whoever `session` currently describes. Anyone landing on
+ * the link starts here as an anonymous viewer; picking a nickname runs it again
+ * with a real identity.
+ */
+async function connectAs({ anonymous, userId }) {
+  closeSocket();
+  resetStream();
+  session.anonymous = anonymous;
+  session.roomId = ROOM_ID;
+  session.userId = userId;
+  session.token = "";
+  session.attempt = 0;
+  session.wanted = true;
+  applyGate();
+  await openSocket();
+}
+
+function closeSocket() {
   session.wanted = false;
   clearTimeout(session.reconnectTimer);
   stopPing();
@@ -921,7 +974,6 @@ function leaveRoom() {
   }
   session.ws = null;
   setComposerEnabled(false);
-  dom.join.hidden = false;
   setNotice("");
 }
 
@@ -1294,28 +1346,26 @@ async function moderatorMute(row) {
 
 dom.joinForm.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const room = dom.room.value.trim();
   const name = dom.name.value.trim();
-  if (!room || !name) return;
+  if (!name) return;
+  setHint(dom.joinHint, "Entrando…");
+  await connectAs({ anonymous: false, userId: name });
+});
 
-  leaveRoom();
-  rows.byCid.clear();
-  rows.byId.clear();
-  chatters.clear();
-  dom.stream.replaceChildren();
+dom.gateBtn.addEventListener("click", () => {
+  dom.picker.hidden = true;
+  dom.settings.hidden = true;
+  dom.join.hidden = false;
+  dom.name.focus();
+});
 
-  session.roomId = room;
-  session.userId = name;
-  session.token = "";
-  session.attempt = 0;
-  session.wanted = true;
-  setHint(dom.joinHint, "Gerando token…");
-  await openSocket();
+dom.joinClose.addEventListener("click", () => {
+  dom.join.hidden = true;
 });
 
 dom.leaveBtn.addEventListener("click", () => {
-  leaveRoom();
-  systemLine("Você saiu da sala.");
+  void watchAnonymously();
+  systemLine("Você voltou a assistir como anônimo.");
 });
 
 dom.composer.addEventListener("submit", (event) => {
@@ -1401,5 +1451,22 @@ window.addEventListener("beforeunload", () => {
   session.ws?.close();
 });
 
-dom.name.value = `convidado${Math.floor(Math.random() * 9000 + 1000)}`;
+/**
+ * Landing on the link is enough to read the room: connect as a throwaway
+ * anonymous identity, which is also what gives the viewer a shard and a place
+ * in the presence count.
+ */
+async function watchAnonymously() {
+  await connectAs({
+    anonymous: true,
+    userId: `anon-${Math.random().toString(36).slice(2, 10)}`,
+  });
+}
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !dom.join.hidden) dom.join.hidden = true;
+});
+
+applyGate();
 autoGrow();
+void watchAnonymously();

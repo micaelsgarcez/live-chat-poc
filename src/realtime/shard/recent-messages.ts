@@ -6,9 +6,12 @@
  * parent from D1 is off the table too — the pipeline is not allowed to do I/O.
  *
  * Every shard receives every accepted message through `fanout`, so each one can
- * keep the same short window in memory and resolve a reply for free. Replying
- * to something older than the window (or after the isolate hibernated) simply
- * yields no reference, and the client falls back to showing the mention alone.
+ * keep the same short window in memory and resolve a reply for free.
+ *
+ * Memory alone was not enough: an evicted isolate loses the window, and a reply
+ * a few seconds later would quietly lose its quote. So the first miss rebuilds
+ * the window from D1 — one query per isolate, on the reply path only, never on
+ * the path a plain message takes.
  */
 import { REPLY_EXCERPT_LENGTH, type ChatMessage, type ReplyRef } from "../../shared/protocol";
 
@@ -38,6 +41,28 @@ export class RecentMessages {
   resolve(messageId: string | undefined): ReplyRef | undefined {
     if (!messageId) return undefined;
     return this.seen.get(messageId);
+  }
+
+  /** True once `hydrate` has run (or is running) for this instance. */
+  get hydrated(): boolean {
+    return this.warming !== null;
+  }
+
+  private warming: Promise<void> | null = null;
+
+  /**
+   * Fills the window from the room's stored history. Concurrent misses share
+   * one query, and a failure is swallowed: a missing quote is not worth losing
+   * the message over.
+   */
+  hydrate(load: () => Promise<Iterable<ChatMessage>>): Promise<void> {
+    this.warming ??= load()
+      .then((messages) => {
+        // Oldest first, so the newest survive the window cap.
+        for (const message of [...messages].reverse()) this.remember(message);
+      })
+      .catch(() => undefined);
+    return this.warming;
   }
 
   forget(messageIds: readonly string[]): void {

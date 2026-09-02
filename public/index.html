@@ -68,7 +68,7 @@
 
     <main class="chat" aria-label="Chat da live">
       <header class="chat__head">
-        <button class="icon-btn" type="button" id="leave-btn" data-tip="Sair da sala" aria-label="Sair da sala">
+        <button class="icon-btn is-invisible" type="button" id="leave-btn" data-tip="Voltar a assistir como anônimo" aria-label="Voltar a assistir como anônimo">
           <svg aria-hidden="true"><use href="#i-collapse" /></svg>
         </button>
         <h1 class="chat__title">Chat da live</h1>
@@ -111,6 +111,11 @@
 
         <div class="notice" id="notice" hidden></div>
 
+        <div class="gate" id="gate">
+          <p class="gate__text">Você está assistindo como <b>Anônimo</b>. Escolha um apelido para conversar.</p>
+          <button class="btn btn--wide" type="button" id="gate-btn">Entrar no chat</button>
+        </div>
+
         <form class="composer__box" id="composer" autocomplete="off">
           <label class="sr-only" for="body-input">Mensagem</label>
           <textarea
@@ -143,7 +148,6 @@
           <span class="composer__count" id="char-count" aria-hidden="true"></span>
           <button class="btn" type="submit" form="composer" id="send-btn" disabled>Chat</button>
         </div>
-      </div>
 
       <!-- emote / gif picker ------------------------------------------------>
       <section class="picker" id="picker" hidden aria-label="Emotes e GIFs">
@@ -200,25 +204,28 @@
       </section>
 
       <!-- join --------------------------------------------------------------->
-      <section class="join" id="join" aria-label="Entrar na sala">
-        <form id="join-form" autocomplete="off">
+      <section class="sheet" id="join" hidden aria-label="Escolher apelido">
+        <header class="sheet__head">
           <h2>Entrar no chat</h2>
-          <label class="field">
-            <span>Sala</span>
-            <input id="room-input" value="demo" required maxlength="60" />
-          </label>
+          <button class="icon-btn icon-btn--sm" type="button" id="join-close" data-tip="Fechar" aria-label="Fechar">
+            <svg aria-hidden="true"><use href="#i-close" /></svg>
+          </button>
+        </header>
+        <form id="join-form" autocomplete="off">
           <label class="field">
             <span>Apelido</span>
-            <input id="name-input" required maxlength="24" />
+            <input id="name-input" required maxlength="24" placeholder="como você aparece no chat" />
           </label>
           <label class="check">
             <input id="mod-input" type="checkbox" />
             <span>Entrar como moderador</span>
           </label>
-          <button class="btn btn--wide" type="submit" id="connect-btn">Conectar</button>
-          <p class="join__hint" id="join-hint">O token é gerado localmente pelo Worker.</p>
+          <button class="btn btn--wide" type="submit" id="connect-btn">Entrar</button>
+          <p class="sheet__hint" id="join-hint"></p>
         </form>
       </section>
+      </div>
+
     </main>
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>

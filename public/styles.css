@@ -648,6 +648,9 @@ body {
   border-top: 1px solid var(--line);
 }
 
+/* The floating panels live inside the composer, so they follow it whether it
+   shows the input or the nickname gate. */
+
 .reply-chip {
   display: flex;
   align-items: center;
@@ -791,9 +794,9 @@ body {
 
 .picker {
   position: absolute;
-  left: 8px;
-  right: 8px;
-  bottom: 92px;
+  left: 10px;
+  right: 10px;
+  bottom: calc(100% - 6px);
   display: flex;
   flex-direction: column;
   height: 340px;
@@ -962,9 +965,9 @@ body {
 
 .sheet {
   position: absolute;
-  left: 8px;
-  right: 8px;
-  bottom: 92px;
+  left: 10px;
+  right: 10px;
+  bottom: calc(100% - 6px);
   padding: 12px;
   border-radius: 8px;
   background: var(--panel-2);
@@ -1068,40 +1071,29 @@ body {
   color: var(--ok);
 }
 
-.join {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: 20px;
-  background: rgb(14 14 16 / 0.94);
-  z-index: 50;
+/* Anonymous viewers see this where the input would be — the same move Twitch
+   makes for someone who is not logged in. */
+.gate {
+  padding: 10px 12px 12px;
+  border-radius: 6px;
+  background: var(--panel-3);
+  text-align: center;
 }
 
-.join form {
-  width: 100%;
-  max-width: 260px;
-}
-
-.join h2 {
-  margin: 0 0 14px;
-  font-size: 15px;
-  font-weight: 700;
-}
-
-.join__hint {
-  margin: 10px 0 0;
+.gate__text {
+  margin: 0 0 10px;
   color: var(--muted);
-  font-size: 11.5px;
-  min-height: 2.4em;
+  font-size: 12px;
 }
 
-.join__hint[data-tone="error"] {
-  color: var(--danger);
+.gate__text b {
+  color: var(--text);
 }
 
-.join__hint[data-tone="ok"] {
-  color: var(--ok);
+/* Keeps the header's three columns even when the control has nothing to do. */
+.is-invisible {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .toast {

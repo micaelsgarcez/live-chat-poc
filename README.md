@@ -20,7 +20,9 @@ npm run setup          # cria .dev.vars e aplica as migrations no D1 local
 npm run dev            # http://127.0.0.1:8787
 ```
 
-Abra `http://127.0.0.1:8787` — o cliente é uma réplica do chat do Twitch:
+Abra `http://127.0.0.1:8787` — o link já entra na sala `demo` como **Anônimo**,
+lendo o chat em tempo real; o apelido só é pedido na hora de escrever. O
+cliente é uma réplica do chat do Twitch:
 nomes coloridos por usuário com o texto sempre em branco, menções com `@` (a
 sua destaca a mensagem inteira), respostas citando a mensagem original,
 seletor de emotes e stickers animados, e ações só de ícone com tooltip —
