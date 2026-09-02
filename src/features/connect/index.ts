@@ -20,7 +20,7 @@ import { newConnectionId, shardName } from "../../shared/ids";
 import type { Slice } from "../../shared/slice";
 import { authenticate } from "../auth";
 import { checkBan } from "../ban";
-import { checkEdgeRateLimit } from "../rate-limit";
+import { checkEdgeRateLimit, hasLoadTestBypass } from "../rate-limit";
 import { getShardCount, selectShardIndex } from "../routing";
 
 export async function handleConnect(
@@ -43,12 +43,18 @@ export async function handleConnect(
     return problem(403, ban.code ?? "banned", ban.reason ?? "you are banned from this room");
   }
 
-  const limitKey = `${clientIp(req)}|${identity.userId}`;
-  const limited = await checkEdgeRateLimit(env, limitKey);
-  if (!limited.allowed) {
-    return problem(429, limited.code ?? "rate_limited", limited.reason ?? "too many connections", {
-      retryAfterMs: limited.retryAfterMs,
-    });
+  // A load test opens thousands of sockets from a handful of IPs, which is the
+  // exact shape the edge limit exists to stop. It skips the limit only when it
+  // presents a fresh signature, and only while a bypass secret is configured at
+  // all — so the people in the public room keep the limit they should have.
+  if (!(await hasLoadTestBypass(req, env))) {
+    const limitKey = `${clientIp(req)}|${identity.userId}`;
+    const limited = await checkEdgeRateLimit(env, limitKey);
+    if (!limited.allowed) {
+      return problem(429, limited.code ?? "rate_limited", limited.reason ?? "too many connections", {
+        retryAfterMs: limited.retryAfterMs,
+      });
+    }
   }
 
   const shardCount = await getShardCount(env, roomId);

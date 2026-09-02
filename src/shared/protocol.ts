@@ -140,6 +140,29 @@ export interface ServerPong {
   ts: number;
 }
 
+/**
+ * Several events in one frame.
+ *
+ * Two costs scale with the size of the room and they are saved separately: the
+ * coordinator coalesces a window of messages into one RPC per shard (fewer
+ * Durable Object requests), and the shard hands that window to each socket as
+ * one frame (fewer writes per connection). At 300k viewers those are the only
+ * two that matter.
+ *
+ * Never nested — `events` holds no `batch` of its own, which is why
+ * `ServerBatch` is deliberately absent from `ServerEvent`.
+ */
+export interface ServerBatch {
+  t: "batch";
+  events: ServerEvent[];
+  /**
+   * Chat messages withheld from *this* socket because it was over its delivery
+   * budget. Absent when nothing was dropped: a client showing a sampled stream
+   * has to be able to say on screen that it is showing a sample.
+   */
+  dropped?: number;
+}
+
 export type ServerMessage =
   | ServerHello
   | ServerChat
@@ -150,7 +173,8 @@ export type ServerMessage =
   | ServerPresence
   | ServerConfig
   | ServerSystem
-  | ServerPong;
+  | ServerPong
+  | ServerBatch;
 
 /**
  * Events the coordinator replicates to every shard.
@@ -176,6 +200,11 @@ export interface PublicRoomConfig {
   slowModeMs: number;
   maxMessageLength: number;
   closed: boolean;
+  /**
+   * Chat messages a single socket may receive per second; 0 means unlimited.
+   * Public because a client that is being sampled must be able to show it.
+   */
+  maxDeliveredPerSecond: number;
 }
 
 /* ------------------------------------------------------------------ */

@@ -88,6 +88,7 @@ const dom = {
   mentionMenu: $("mention-menu"),
   settingsBtn: $("settings-btn"),
   slowPill: $("slow-pill"),
+  samplePill: $("sample-pill"),
   charCount: $("char-count"),
   send: $("send-btn"),
   picker: $("picker"),
@@ -748,6 +749,44 @@ function onPresence(msg) {
   dom.viewers.textContent = String(msg.count);
 }
 
+/**
+ * How much of the room this viewer is actually seeing.
+ *
+ * Counted over a rolling 10s window rather than shown per batch: a single
+ * "3 dropped" tells you nothing, while "mostrando 20 de 340 msg/s" is the whole
+ * story of a room too big to deliver in full.
+ */
+const sampling = { shown: 0, dropped: 0, since: 0 };
+
+function onSampled(dropped) {
+  sampling.dropped += dropped;
+}
+
+function noteShown(count) {
+  sampling.shown += count;
+}
+
+function refreshSamplePill() {
+  const now = Date.now();
+  if (!sampling.since) sampling.since = now;
+  const seconds = (now - sampling.since) / 1000;
+  if (seconds < 2) return;
+  const total = sampling.shown + sampling.dropped;
+  if (sampling.dropped === 0) {
+    dom.samplePill.hidden = true;
+  } else {
+    dom.samplePill.hidden = false;
+    dom.samplePill.textContent = `mostrando ${Math.round(sampling.shown / seconds)} de ${Math.round(total / seconds)} msg/s`;
+    dom.samplePill.title =
+      "A sala recebe mais mensagens do que uma tela consegue mostrar, então cada espectador vê uma amostra. A sua própria mensagem nunca é amostrada.";
+  }
+  sampling.shown = 0;
+  sampling.dropped = 0;
+  sampling.since = now;
+}
+
+setInterval(refreshSamplePill, 2000);
+
 function onSystem(msg) {
   systemLine(`${msg.code}${msg.reason ? ` — ${msg.reason}` : ""}`, "error");
   if (msg.code === "banned") {
@@ -771,9 +810,21 @@ function dispatch(raw) {
   } catch {
     return;
   }
+  return apply(msg);
+}
+
+function apply(msg) {
   switch (msg.t) {
+    // A coalesced window: the events inside are ordinary frames, in order.
+    case "batch": {
+      if (msg.dropped > 0) onSampled(msg.dropped);
+      for (const inner of msg.events) apply(inner);
+      return undefined;
+    }
     case "hello": return onHello(msg);
-    case "msg": return onChat(msg.m);
+    case "msg":
+      noteShown(1);
+      return onChat(msg.m);
     case "ack": return onAck(msg);
     case "rejected": return onRejected(msg);
     case "delete": return onDelete(msg);

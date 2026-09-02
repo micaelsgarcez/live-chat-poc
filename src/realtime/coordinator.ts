@@ -29,6 +29,8 @@ import { toPublicConfig } from "../shared/room-config";
 import {
   defaultRoomConfig,
   mergeRoomConfig,
+  normalizeRoomConfig,
+  type FanoutConfig,
   type RoomConfig,
   type RoomConfigPatch,
 } from "../shared/room-config";
@@ -61,6 +63,16 @@ const COUNTER_PERSIST_EVERY = 50;
 /** How many delete ids to remember so a retried delete does not re-fan out. */
 const RECENT_DELETE_MEMORY = 1_000;
 
+/** Upper bound on `fanout.batchWindowMs`; past this a viewer feels the lag. */
+const MAX_BATCH_WINDOW_MS = 1_000;
+
+/**
+ * Hard cap on a pending coalescing window. A flush that wedges must lose
+ * messages rather than grow the isolate's heap until it is evicted — and losing
+ * the oldest is the right end to lose from in a live chat.
+ */
+const MAX_PENDING_FANOUT = 5_000;
+
 interface Counters {
   messagesPublished: number;
   connections: number;
@@ -76,6 +88,25 @@ interface BanState {
 /** The slice of `ShardApi` the coordinator ever calls. */
 type ShardTarget = Pick<ShardApi, "fanout" | "applyConfig" | "kickUsers">;
 
+/**
+ * `RoomConfig` arrives from an unvalidated moderator PATCH, so the two fanout
+ * knobs are bounded here rather than trusted: a typo in a window must not park
+ * every message in the room for an hour.
+ */
+function clampFanout(fanout: FanoutConfig): FanoutConfig {
+  const window = Number.isFinite(fanout.batchWindowMs) ? fanout.batchWindowMs : 0;
+  const cap = Number.isFinite(fanout.maxPerViewerPerSecond) ? fanout.maxPerViewerPerSecond : 0;
+  return {
+    batchWindowMs: Math.min(MAX_BATCH_WINDOW_MS, Math.max(0, Math.floor(window))),
+    maxPerViewerPerSecond: Math.max(0, Math.floor(cap)),
+    alwaysDeliverOwn: fanout.alwaysDeliverOwn !== false,
+  };
+}
+
+function batchWindowOf(config: RoomConfig): number {
+  return clampFanout(config.fanout).batchWindowMs;
+}
+
 export class RoomCoordinator extends DurableObject<Env> implements CoordinatorApi {
   private config: RoomConfig | null = null;
   private registry = new ShardRegistry();
@@ -87,6 +118,11 @@ export class RoomCoordinator extends DurableObject<Env> implements CoordinatorAp
   private alarmAt: number | null = null;
   /** Last room-wide presence pushed to the clients; -1 means never. */
   private lastPresenceBroadcast = -1;
+  /** Messages accepted since the last coalesced flush. Empty when batching is off. */
+  private pendingFanout: ServerEvent[] = [];
+  private flushScheduled = false;
+  /** Messages dropped because a flush could not keep up — reported by `getStats`. */
+  private coalesceOverflow = 0;
   private dirty = false;
   private readonly log = createLogger("coordinator", (this.env.LOG_LEVEL as LogLevel) ?? "info");
 
@@ -102,7 +138,9 @@ export class RoomCoordinator extends DurableObject<Env> implements CoordinatorAp
         ctx.storage.get<Array<[string, BanState]>>(KEY_BANS),
         ctx.storage.getAlarm(),
       ]);
-      this.config = config ?? null;
+      // A room that predates a config field reads back without it; filling it
+      // in here means adding a field never breaks a room that already exists.
+      this.config = config ? normalizeRoomConfig(config) : null;
       this.registry = new ShardRegistry(decodeShardRecords(shards, Date.now()));
       this.counters = counters ?? { messagesPublished: 0, connections: 0 };
       this.bans = new Map(bans ?? []);
@@ -149,17 +187,65 @@ export class RoomCoordinator extends DurableObject<Env> implements CoordinatorAp
   /* ---------------------------------------------------------------- */
 
   async publish(input: PublishInput): Promise<PublishResult> {
-    await this.load(input.message.roomId);
+    const config = await this.load(input.message.roomId);
     this.counters.messagesPublished++;
     this.dirty = true;
     // A shard that publishes is demonstrably alive, so it keeps its heartbeat.
     this.registry.touch(input.originShardIndex, Date.now());
-    const result = await this.fanout([{ t: "msg", m: input.message }]);
+
+    const window = batchWindowOf(config);
+    let result: PublishResult;
+    if (window > 0) {
+      // Deliberately not awaited: the caller is a shard that has not acked its
+      // sender yet, so waiting out the coalescing window here would charge the
+      // *sender* for a saving made on behalf of the viewers.
+      this.queueForFanout({ t: "msg", m: input.message }, window);
+      result = { delivered: 0, failedShards: [] };
+    } else {
+      result = await this.fanout([{ t: "msg", m: input.message }]);
+    }
+
     if (this.counters.messagesPublished % COUNTER_PERSIST_EVERY === 0) {
       await this.ctx.storage.put(KEY_COUNTERS, this.counters);
     }
     await this.ensureAlarm();
     return result;
+  }
+
+  /**
+   * Holds a message until the window closes, then fans the whole window out in
+   * one RPC per shard. 1.000 msg/s across 60 shards is 60.000 calls per second
+   * unbatched and 600 at a 100 ms window — the same delivery, two orders of
+   * magnitude less Durable Object billing.
+   */
+  private queueForFanout(event: ServerEvent, windowMs: number): void {
+    if (this.pendingFanout.length >= MAX_PENDING_FANOUT) {
+      this.pendingFanout.shift();
+      this.coalesceOverflow++;
+      this.log.warn("coalescing window overflowed, dropping oldest", {
+        dropped: this.coalesceOverflow,
+      });
+    }
+    this.pendingFanout.push(event);
+    if (this.flushScheduled) return;
+    this.flushScheduled = true;
+    // `waitUntil` keeps the object alive across the timer; the RPC that opened
+    // the window has already returned by the time this resolves.
+    this.ctx.waitUntil(
+      new Promise<void>((resolve) => setTimeout(resolve, windowMs)).then(() => this.flushFanout()),
+    );
+  }
+
+  private async flushFanout(): Promise<void> {
+    this.flushScheduled = false;
+    const batch = this.pendingFanout;
+    this.pendingFanout = [];
+    if (batch.length === 0) return;
+    try {
+      await this.fanout(batch);
+    } catch (error) {
+      this.log.error("coalesced fanout failed", { error: String(error), events: batch.length });
+    }
   }
 
   async broadcast(events: ServerEvent[]): Promise<PublishResult> {
@@ -322,6 +408,7 @@ export class RoomCoordinator extends DurableObject<Env> implements CoordinatorAp
     next: RoomConfig,
     previousShardCount: number,
   ): Promise<RoomConfig> {
+    next.fanout = clampFanout(next.fanout);
     this.config = next;
     await this.ctx.storage.put(KEY_CONFIG, next);
     if (next.shardCount !== previousShardCount) {
@@ -351,6 +438,13 @@ export class RoomCoordinator extends DurableObject<Env> implements CoordinatorAp
   }
 
   private async fanout(events: ServerEvent[]): Promise<PublishResult> {
+    if (this.pendingFanout.length > 0) {
+      // A delete, a config or a presence change must never overtake a message
+      // that is still sitting in the coalescing window ahead of it.
+      const queued = this.pendingFanout;
+      this.pendingFanout = [];
+      events = [...queued, ...events];
+    }
     const outcome = await this.callShards((stub) => stub.fanout(events));
     // `delivered` is socket-level: what the shards actually wrote to clients.
     const delivered = outcome.ok.reduce((total, entry) => total + (entry.value ?? 0), 0);
