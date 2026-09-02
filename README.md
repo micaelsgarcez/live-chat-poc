@@ -103,10 +103,9 @@ extrapolado: `max` exige ~30 máquinas de carga e não foi executado.
 
 ### Demonstração
 
-O teste rodando contra a produção, com os dados ao vivo na página pública:
-**[docs/demonstracao.mp4](docs/demonstracao.mp4)** — 400 espectadores, 40
-remetentes, coalescência e amostragem ligadas, com o painel mostrando lado a
-lado o que o gerador abriu e o que a sala relata.
+O teste rodando contra a produção, com os dados ao vivo na página pública: 400
+espectadores, 40 remetentes, coalescência e amostragem ligadas, e o painel
+mostrando lado a lado o que o gerador abriu e o que a sala relata.
 
 ## Como uma mensagem viaja
 
