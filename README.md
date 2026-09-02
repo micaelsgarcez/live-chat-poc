@@ -8,6 +8,12 @@ o que não precisa ser em tempo real.
 TypeScript, **vertical slice architecture**, e tudo roda **100% local** — sem
 conta Cloudflare, sem deploy.
 
+> **Estado: prova de conceito concluída.** O produto funciona ponta a ponta e foi
+> medido em produção; o run de referência passa nos seis critérios. A meta de
+> 300 mil conexões **não foi alcançada**, e a medição diz exatamente por quê —
+> veja [E para 300 mil conexões?](#e-para-300-mil-conexões) e
+> [`docs/LOADTEST.md`](docs/LOADTEST.md). Nenhum número aqui é extrapolado.
+
 - `PLAN.md` — a arquitetura, o porquê de cada decisão e o cronograma.
 - `CLAUDE.md` — as regras de trabalho no repositório (contratos congelados,
   limites entre fatias, estilo).
@@ -95,6 +101,13 @@ Quando divergem, a divergência é o achado.
 degraus grandes estão em [`docs/LOADTEST.md`](docs/LOADTEST.md).** Nada ali é
 extrapolado: `max` exige ~30 máquinas de carga e não foi executado.
 
+### Demonstração
+
+O teste rodando contra a produção, com os dados ao vivo na página pública:
+**[docs/demonstracao.mp4](docs/demonstracao.mp4)** — 400 espectadores, 40
+remetentes, coalescência e amostragem ligadas, com o painel mostrando lado a
+lado o que o gerador abriu e o que a sala relata.
+
 ## Como uma mensagem viaja
 
 ```
@@ -177,33 +190,114 @@ Regra de dependência: uma fatia importa `src/shared/*` e o `index.ts` público 
 outra fatia — nunca arquivos internos de outra fatia. `src/features/registry.ts`
 é o único módulo que conhece todas.
 
-## Números medidos localmente
+## Números medidos em produção
 
-`wrangler dev` numa sala com 4 shards, 12 msg/s, um quarto dos clientes falando.
-Todos abriram 100 % dos sockets pedidos, com zero handshake perdido e zero
-mensagem confirmada e não entregue:
+Contra o deploy real, sala com 8 shards, coalescência de 100 ms e teto de
+4 msg/s por espectador. Todos os runs abriram 100 % dos sockets pedidos, com
+zero handshake perdido e zero mensagem confirmada e não entregue.
 
-| sockets | entregues/s | ack p50 | ack p99 | entrega p99 | veredito |
-|---:|---:|---:|---:|---:|---|
-| 25 | 164 | 25 ms | 87 ms | 72 ms | PASS |
-| 50 | 348 | 32 ms | 103 ms | 94 ms | PASS |
-| 100 | 666 | 27 ms | 69 ms | 60 ms | PASS |
-| 200 | 1.302 | 701 ms | 1.457 ms | 1.250 ms | FAIL |
+O run de referência — **400 espectadores, 40 remetentes, 5 minutos no topo** —
+passou nos seis critérios:
 
-E o efeito de ligar coalescência e amostragem, com o mesmo carregamento
-oferecido (20 sockets, 10 remetentes, 20 msg/s):
-
-| | desligado | ligado |
+| | resultado | limite |
 |---|---:|---:|
-| ack p99 | 580 ms | **75 ms** |
-| entrega p99 | 551 ms | **169 ms** |
-| frames de WebSocket | 7.392 | **2.658** |
-| chamadas de DO no fanout | 1.604 | **1.168** |
-| veredito | FAIL | **PASS** |
+| ack p99 | **232 ms** | 250 ms |
+| entrega fim a fim p99 | **344 ms** | 1 s |
+| handshakes perdidos | 0 de 400 | 0,5 % |
+| mensagem confirmada e não entregue | 0 de 3.602 | zero |
+| presença vs sockets abertos | 0,25 % | 1 % |
 
-**Teto local:** o proxy do `wrangler dev` (não o Worker) cede por *frames por
-segundo*, não por sockets — limpo até ~700, degradado em ~1.300, e acima disso o
-processo morre com um `ERROR` vazio do ProxyController, sem nenhum erro do lado
-do Worker. Isso é limitação da ferramenta de desenvolvimento, não da
-arquitetura; os números de escala real dependem de um deploy e de uma frota de
-máquinas de carga. Veja [`docs/LOADTEST.md`](docs/LOADTEST.md).
+### O que custa latência, e o que não custa
+
+Um 2×2 que isola as duas variáveis:
+
+| | 400 espectadores | 1.000 espectadores |
+|---|---:|---:|
+| **12 msg/s entrando** | ack p99 232 ms | ack p99 601 ms |
+| **30 msg/s entrando** | ack p99 236 ms | — |
+
+**Taxa de entrada é de graça. Conexão custa.** 2,5× mais mensagens não mudou
+nada; 2,5× mais conexões multiplicou a latência por 2,6.
+
+### O botão que funciona
+
+A janela de coalescência, com 1.000 conexões:
+
+| `batchWindowMs` | ack p99 | entrega p99 |
+|---:|---:|---:|
+| 100 ms | 601 ms | 607 ms |
+| 250 ms | 395 ms | 636 ms |
+| **500 ms** | **317 ms** | 803 ms |
+
+Quem escreve espera quase metade; quem assiste espera mais, e os dois ficam
+dentro do orçamento. Chat de live é assimétrico — milhares assistem, dezenas
+escrevem — então comprar latência de envio com latência de entrega é o câmbio
+certo. É `PATCH` na config da sala, sem deploy.
+
+### O botão que **não** funciona
+
+| shards | sockets por shard | ack p99 |
+|---:|---:|---:|
+| 8 | 126 | 601 ms |
+| 20 | 53 | **922 ms** |
+
+Menos sockets por shard e a latência piorou 53 %. `RoomCoordinator.fanout` chama
+todos os shards e **espera todos**: a rodada dura o *máximo* entre eles, e o
+máximo de 20 amostras é pior que o de 8. Dividir mais a sala só multiplica as
+chances de existir um lento.
+
+> Isso derrubou duas hipóteses nossas. `MAX_SOCKETS_PER_SHARD` não é o botão que
+> parecia ser — se mais shards pioram, baixar o teto por shard piora junto. E o
+> custo por socket no fanout não era a desserialização do attachment: remover
+> aquele trabalho por socket por rodada mudou o ack de 601 ms para 601 ms.
+
+## E para 300 mil conexões?
+
+A pergunta que a POC existe para responder. **A resposta medida é: a arquitetura
+como está não chega lá** — e o motivo não é o que o `PLAN.md` supunha.
+
+300 mil sockets precisam de pelo menos 60 shards para caberem em
+`maxSocketsPerShard` de 5.000. Mas **20 shards já são piores que 8**, porque o
+coordinator espera todos. O desenho tem uma contradição interna: você precisa de
+muitos shards para segurar os sockets, e muitos shards deixam o coordinator
+lento. O gargalo não é socket, não é CPU, não é taxa de mensagem — é um `await`.
+
+### O que 300k / 30k realmente pede
+
+Com 30 mil remetentes (10 % das conexões) a 1 mensagem a cada 30 s:
+
+| | valor | de onde vem |
+|---|---:|---|
+| entrada | ~1.000 msg/s | 30k ÷ 30s — **medido como irrelevante** |
+| saída, teto de 4 msg/s | **1,2 M frames/s** | 300k × 4 |
+| saída, teto de 20 msg/s | **6 M frames/s** | 300k × 20 |
+
+O teto por espectador é o que decide tudo: sem ele, 1.000 msg/s × 300 mil
+espectadores seriam 300 milhões de frames por segundo, que não é caro — é
+impossível.
+
+### O que faltaria construir
+
+1. **O coordinator não pode esperar os shards.** Ele soma `delivered` de cada um
+   para devolver um `PublishResult` que o shard **descarta** — está se
+   bloqueando no resultado de um trabalho que ninguém lê.
+2. **Fila por shard**, para que um shard lento atrase só os próprios
+   espectadores em vez da sala inteira. É o que faria mais shards finalmente
+   ajudar.
+3. **Fanout em árvore.** Nenhum objeto deve falar com centenas de outros:
+   coordinator → relays → folhas. Com o fator de ramificação de 32 que o código
+   já usa, dois níveis alcançam 1.024 shards.
+4. **Medir o teto de escrita de um shard.** Este número nós **não temos** — o
+   coordinator saturou antes, então todos os experimentos mediram ele, não o
+   shard. É a primeira coisa a medir depois do item 1.
+
+Sem o item 4 qualquer contagem de shards é chute. Com ele, a conta fecha
+sozinha: `shards = 300.000 ÷ sockets por shard`, com o teto por espectador
+escolhido para o total de frames/s caber.
+
+**O teto local do `wrangler dev`** é de ~700 frames/s limpos e ~1.300
+degradados; acima disso o proxy morre sem nenhum erro do lado do Worker. Não é
+limite da arquitetura, é da ferramenta de desenvolvimento.
+
+Os números completos, o método e o que não foi executado estão em
+[`docs/LOADTEST.md`](docs/LOADTEST.md).
