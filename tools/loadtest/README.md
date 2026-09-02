@@ -89,3 +89,22 @@ node tools/loadtest/run.mjs --clients 50 --rate 20 --duration 30 --json > after.
   workerd process on your laptop) is saturated, not that the design is. Past
   roughly 50 sockets plus 1k fanout frames/s the local rig is the bottleneck —
   spread the run with a longer `--ramp` or trade viewers for talkers.
+
+## Teto do ambiente local (medido)
+
+O gargalo local é o proxy do `wrangler dev`, não o Worker. Nesta máquina:
+
+| sockets | frames/s | ack p50 | resultado |
+|---|---|---|---|
+| 25 | ~200 | 23 ms | limpo |
+| 40 | ~560 | 1.7 s | conecta tudo, mas a latência vira segundos |
+| 50 | ~300 | 1.4 s | começa a perder handshakes |
+| 100+ | — | — | o proxy morre com `Network connection lost` |
+
+O log do wrangler mostra `Error in ProxyController: Error inside ProxyWorker`
+sem nenhum erro do lado do Worker — não há limite de subrequest, memória ou
+exceção da aplicação envolvidos. Para números acima disso, aponte o `--url`
+para um deploy real (`wrangler deploy` e `wss://<worker>.workers.dev`).
+
+Use a faixa de até ~25 sockets para comparar mudanças de código: é onde a
+medição reflete o Worker e não a ferramenta.

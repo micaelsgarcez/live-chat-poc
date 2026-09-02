@@ -156,7 +156,25 @@ carga local simulando picos de 10–50 msg/s e ensaio de `wrangler dev` fim a fi
 | Rate Limiting nativo da CF | ⚠️ | binding só em produção; fallback KV local |
 | Teste de carga | ✅ | `npm run loadtest` (N sockets contra o dev local) |
 
-## 8. Comandos
+## 8. Status da primeira versão — entregue
+
+Todas as etapas do cronograma estão concluídas e verificadas no runtime real:
+
+| Etapa | Entregue |
+|---|---|
+| 1. Borda: auth, roteamento, ban-check | JWT HS256 local + RS256/ES256 via JWKS, ban em KV com verdade em D1, rate-limit de borda com fallback local, colocação por hash lida do KV |
+| 2. Shard: WebSocket + hibernação + broadcast | hibernação com reidratação conservadora, alarm por deadline (não por cadência), registro/desregistro no coordinator, backpressure e stats |
+| 3. Rate-limit, slow-mode, spam | token bucket por usuário, intervalo por sala, heurísticas de duplicata/burst/links/menções/caps com escalada até mute |
+| 4. Moderação síncrona + fila assíncrona | wordlist com normalização e leet, regex memoizada por versão, consumer que pontua sinais fracos e emite delete retroativo |
+| 5. Persistência em lote + carga | buffer com backpressure e requeue, consumer idempotente em D1, histórico paginado, gerador de carga com percentis |
+| 6–7. Ranking, hibernação, ensaio | ranking por cron + alarm do coordinator para a janela curta, cliente de demonstração completo, ensaio fim a fim em `wrangler dev` |
+
+**Verificação:** `npm run check` roda 250 testes dentro do workerd, incluindo um
+teste que percorre o produto inteiro (socket → broadcast → presença → lote → D1
+→ histórico → ranking → delete retroativo → ban). Os números medidos e o teto do
+ambiente local estão no `README.md`.
+
+## 9. Comandos
 
 ```bash
 npm install
