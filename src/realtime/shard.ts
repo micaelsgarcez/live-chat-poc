@@ -122,8 +122,15 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
       return;
     }
     if (parsed.t === "react") {
-      // Reactions are counted by the persistence/ranking slices; the shard just
-      // relays them so every client sees the same number.
+      // Reactions ride the persistence batch (ranking counts them) and are
+      // relayed so every client sees the same number.
+      this.bufferOf(config).addReaction({
+        roomId: meta.roomId,
+        messageId: parsed.messageId,
+        userId: meta.identity.userId,
+        emoji: parsed.emoji,
+        ts: Date.now(),
+      });
       await this.coordinator().broadcast([
         { t: "reaction", messageId: parsed.messageId, emoji: parsed.emoji, count: 1 },
       ]);

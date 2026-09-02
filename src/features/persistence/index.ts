@@ -20,6 +20,7 @@ export function createMessageBuffer(
 ): MessageBuffer {
   return {
     add: () => true,
+    addReaction: () => true,
     size: () => 0,
     shouldFlush: () => false,
     flush: async () => 0,

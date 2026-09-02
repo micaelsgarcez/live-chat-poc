@@ -100,11 +100,20 @@ export interface BanStore {
   list(roomId: string): Promise<BanRecord[]>;
 }
 
-/** Batch of messages a shard hands to the persistence slice. */
+export interface PersistReaction {
+  roomId: string;
+  messageId: string;
+  userId: string;
+  emoji: string;
+  ts: number;
+}
+
+/** Batch a shard hands to the persistence slice, once per flush. */
 export interface PersistBatch {
   roomId: string;
   shardIndex: number;
   messages: ChatMessage[];
+  reactions: PersistReaction[];
   flushedAt: number;
 }
 
@@ -155,6 +164,8 @@ export interface ConnectGuardResult {
 export interface MessageBuffer {
   /** Returns false when the buffer is full and the message was dropped. */
   add(message: ChatMessage): boolean;
+  /** Reactions ride the same batch so ranking can count them. */
+  addReaction(reaction: PersistReaction): boolean;
   size(): number;
   shouldFlush(now: number): boolean;
   /** Ships the buffered messages to the queue; returns how many were sent. */
