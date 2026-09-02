@@ -10,6 +10,7 @@
  *  - a reply carries only the parent id; the shard resolves the author and the
  *    excerpt, so nothing here may invent them.
  */
+import { mountConsole } from "./console.js";
 import {
   EMOTE_SETS,
   GIF_SET,
@@ -134,6 +135,8 @@ const session = {
   slowModeTimer: 0,
   toastTimer: 0,
   lastPingAt: 0,
+  /** Last measured round trip; the console feeds it into the health verdict. */
+  latencyMs: 0,
   config: null,
   seq: 0,
   replyTo: null,
@@ -755,7 +758,8 @@ function onSystem(msg) {
 
 function onPong() {
   if (session.lastPingAt) {
-    dom.factPing.textContent = `${Date.now() - session.lastPingAt} ms`;
+    session.latencyMs = Date.now() - session.lastPingAt;
+    dom.factPing.textContent = `${session.latencyMs} ms`;
     session.lastPingAt = 0;
   }
 }
@@ -1529,4 +1533,23 @@ document.addEventListener("keydown", (event) => {
 
 applyGate();
 autoGrow();
+
+/*
+ * The console reads the room over HTTP and knows nothing about the socket, so
+ * it is handed the two live facts only this file has: the token that decides
+ * whether the audit column is allowed to name people, and the round trip the
+ * socket last measured.
+ */
+mountConsole({
+  roomId: ROOM_ID,
+  context: () => ({ token: session.token, pingMs: session.latencyMs }),
+  onRequestModerator: () => {
+    dom.picker.hidden = true;
+    dom.settings.hidden = true;
+    dom.join.hidden = false;
+    dom.moderator.checked = true;
+    dom.name.focus();
+  },
+});
+
 void watchAnonymously();

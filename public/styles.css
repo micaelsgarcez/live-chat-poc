@@ -1,36 +1,70 @@
 /*
- * Twitch chat, rebuilt.
+ * Twitch chat, rebuilt — wearing Real Oficial's clothes.
  *
- * The reference pins the direction, so the values here are Twitch's own: the
- * #18181b column, the #9147ff action colour, 13px/1.35 type with 700-weight
- * names, and a message that flows as one paragraph rather than a card. The only
- * invented surfaces are the ones Twitch has no equivalent for — joining, and
- * the room settings a moderator needs.
+ * The chat mechanics are Twitch's: 13px/1.35 type, 700-weight names, a message
+ * that flows as one paragraph rather than a card. The palette is not: the
+ * console lives inside a white product surface, so the whole thing was
+ * retokenised to Real Oficial's own values — the #7E62F0 purple, the #0A0A0A
+ * ink, the near-white grounds — and every colour below now comes from a token
+ * so the next brand costs one block instead of a thousand lines.
+ *
+ * Layout is three columns: audit on the left, the Cloudflare panel in the
+ * middle, chat pinned right where a Twitch viewer expects it.
  */
 
 :root {
-  --bg: #0e0e10;
-  --panel: #18181b;
-  --panel-2: #1f1f23;
-  --panel-3: #26262c;
-  --line: #2f2f35;
-  --text: #efeff1;
-  --muted: #adadb8;
-  --dim: #7e7e88;
-  --brand: #9147ff;
-  --brand-hi: #a970ff;
-  --brand-press: #772ce8;
-  --mention: rgba(145, 71, 255, 0.18);
-  --danger: #ff5c5c;
-  --ok: #3ddc97;
-  --radius: 4px;
+  /* grounds, lightest to heaviest */
+  --bg: #f2f2f6;
+  --panel: #ffffff;
+  --panel-2: #f7f7fb;
+  --panel-3: #ecebf4;
+  --line: #e2e0ec;
+  --hairline: rgb(18 18 26 / 0.06);
+
+  /* ink */
+  --text: #12121a;
+  --muted: #5b5b6e;
+  --dim: #8b8b9e;
+
+  /* Real Oficial */
+  --brand: #7e62f0;
+  --brand-hi: #9981fd;
+  --brand-press: #6d28d9;
+  --brand-wash: #f5f2ff;
+  --on-brand: #ffffff;
+  --mention: rgb(126 98 240 / 0.13);
+  --mention-hi: rgb(126 98 240 / 0.22);
+
+  /* status — the three the health verdict speaks in */
+  --ok: #12a150;
+  --warn: #b45309;
+  --danger: #d92d20;
+  --ok-wash: #e9f7ef;
+  --warn-wash: #fdf3e6;
+  --danger-wash: #fdecea;
+
+  --badge-mod: #0f9d38;
+  --badge-admin: #d92d20;
+
+  /* Shadows carry the elevation that a dark UI got from contrast alone. */
+  --shadow-1: 0 1px 3px rgb(18 18 26 / 0.10);
+  --shadow-2: 0 4px 14px rgb(18 18 26 / 0.12);
+  --shadow-3: 0 10px 34px rgb(18 18 26 / 0.16);
+  --scroll: #cdccdb;
+  --tooltip-bg: #12121a;
+  --tooltip-fg: #ffffff;
+
+  --radius: 6px;
   --tap: 30px;
+  --header-h: 56px;
+  --chat-w: 352px;
   --font: Inter, "Segoe UI Variable Text", "Segoe UI", Roboto, "Helvetica Neue",
     Arial, "Noto Sans", sans-serif;
   /* The last two are monochrome fallbacks: a machine with no colour emoji font
      should still draw a glyph rather than a tofu box. */
   --emoji: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji",
     "Twemoji Mozilla", "Noto Emoji", Symbola, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
 }
 
 * {
@@ -54,8 +88,13 @@ body {
   color: var(--text);
   font: 400 13px/1.35 var(--font);
   -webkit-font-smoothing: antialiased;
+  /* One viewport-tall column: header, the console that takes what is left, and
+     the column switcher that narrow screens need. Sizing the console off
+     `100dvh` instead would push the switcher below the fold. */
+  height: 100dvh;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .sprite {
@@ -89,11 +128,13 @@ body {
   position: relative;
   display: flex;
   flex-direction: column;
-  width: 340px;
-  max-width: 100%;
-  height: 100dvh;
+  width: 100%;
+  min-width: 0;
+  /* The console grid owns the height now; on its own (narrow screens) the chat
+     still has to fill the viewport below the brand header. */
+  height: 100%;
   background: var(--panel);
-  border-inline: 1px solid var(--line);
+  border-left: 1px solid var(--line);
   overflow: hidden;
 }
 
@@ -187,7 +228,7 @@ body {
   border: 0;
   border-radius: var(--radius);
   background: var(--brand);
-  color: #fff;
+  color: var(--on-brand);
   font: 600 13px/1 var(--font);
   cursor: pointer;
 }
@@ -217,7 +258,7 @@ body {
 }
 
 .btn--quiet:hover:not(:disabled) {
-  background: #35353d;
+  background: var(--panel-3);
 }
 
 /* One tooltip mechanism for every icon-only control, keyboard included. */
@@ -233,8 +274,8 @@ body {
   translate: -50% 0;
   padding: 4px 8px;
   border-radius: var(--radius);
-  background: #000;
-  color: #fff;
+  background: var(--tooltip-bg);
+  color: var(--tooltip-fg);
   font-size: 11px;
   font-weight: 600;
   line-height: 1.3;
@@ -389,7 +430,7 @@ body {
   max-height: 232px;
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: #3f3f46 transparent;
+  scrollbar-color: var(--scroll) transparent;
 }
 
 .board__row {
@@ -402,7 +443,7 @@ body {
 }
 
 .board__row + .board__row {
-  border-top: 1px solid rgb(255 255 255 / 0.04);
+  border-top: 1px solid var(--hairline);
 }
 
 /* The top three carry a medal instead of a bare number, which is what makes
@@ -516,7 +557,7 @@ body {
   overflow-x: hidden;
   overscroll-behavior: contain;
   scrollbar-width: thin;
-  scrollbar-color: #3f3f46 transparent;
+  scrollbar-color: var(--scroll) transparent;
 }
 
 .stream::-webkit-scrollbar {
@@ -524,7 +565,7 @@ body {
 }
 
 .stream::-webkit-scrollbar-thumb {
-  background: #3f3f46;
+  background: var(--scroll);
   border-radius: 99px;
 }
 
@@ -556,7 +597,7 @@ body {
 }
 
 .msg--mentioned:hover {
-  background: rgba(145, 71, 255, 0.26);
+  background: var(--mention-hi);
 }
 
 .msg--pending {
@@ -590,11 +631,11 @@ body {
 }
 
 .msg__badge--mod {
-  background: #00ad03;
+  background: var(--badge-mod);
 }
 
 .msg__badge--admin {
-  background: #eb0400;
+  background: var(--badge-admin);
 }
 
 .msg__name {
@@ -621,7 +662,7 @@ body {
 
 .mention--me {
   background: var(--brand);
-  color: #fff;
+  color: var(--on-brand);
 }
 
 .emote {
@@ -715,7 +756,7 @@ body {
   padding: 1px;
   border-radius: var(--radius);
   background: var(--panel-3);
-  box-shadow: 0 1px 6px rgb(0 0 0 / 0.45);
+  box-shadow: var(--shadow-1);
   opacity: 0;
   pointer-events: none;
 }
@@ -746,7 +787,7 @@ body {
   padding: 4px;
   border-radius: 6px;
   background: var(--panel-3);
-  box-shadow: 0 4px 14px rgb(0 0 0 / 0.5);
+  box-shadow: var(--shadow-2);
   z-index: 30;
 }
 
@@ -762,7 +803,7 @@ body {
 }
 
 .react-strip button:hover {
-  background: #3a3a42;
+  background: var(--panel-3);
 }
 
 .jump {
@@ -778,7 +819,7 @@ body {
   border: 0;
   border-radius: 99px;
   background: var(--brand);
-  color: #fff;
+  color: var(--on-brand);
   font: 600 12px/1 var(--font);
   cursor: pointer;
   z-index: 20;
@@ -860,7 +901,7 @@ body {
 
 .composer__box:focus-within {
   border-color: var(--brand);
-  background: #000;
+  background: var(--panel);
 }
 
 .composer__box textarea {
@@ -917,7 +958,7 @@ body {
   padding: 4px;
   border-radius: 6px;
   background: var(--panel-2);
-  box-shadow: 0 6px 20px rgb(0 0 0 / 0.55);
+  box-shadow: var(--shadow-3);
   z-index: 30;
 }
 
@@ -955,7 +996,7 @@ body {
   height: 340px;
   border-radius: 8px;
   background: var(--panel-2);
-  box-shadow: 0 10px 34px rgb(0 0 0 / 0.6);
+  box-shadow: var(--shadow-3);
   z-index: 35;
   overflow: hidden;
 }
@@ -1010,8 +1051,8 @@ body {
 }
 
 .tab.is-active {
-  background: var(--text);
-  color: #0e0e10;
+  background: var(--brand);
+  color: var(--on-brand);
 }
 
 .picker__body {
@@ -1028,7 +1069,7 @@ body {
   overflow-x: hidden;
   padding: 8px;
   scrollbar-width: thin;
-  scrollbar-color: #3f3f46 transparent;
+  scrollbar-color: var(--scroll) transparent;
 }
 
 .picker__group-title {
@@ -1124,7 +1165,7 @@ body {
   padding: 12px;
   border-radius: 8px;
   background: var(--panel-2);
-  box-shadow: 0 10px 34px rgb(0 0 0 / 0.6);
+  box-shadow: var(--shadow-3);
   z-index: 35;
 }
 
@@ -1256,11 +1297,11 @@ body {
   translate: -50% 0;
   padding: 8px 14px;
   border-radius: 6px;
-  background: #000;
-  color: #fff;
+  background: var(--tooltip-bg);
+  color: var(--tooltip-fg);
   font-size: 12px;
   font-weight: 600;
-  box-shadow: 0 6px 20px rgb(0 0 0 / 0.6);
+  box-shadow: var(--shadow-3);
   z-index: 60;
 }
 
@@ -1292,4 +1333,734 @@ body {
   .picker__grid--gifs svg * {
     animation: none !important;
   }
+}
+
+/* ================================================================== */
+/* Real Oficial shell: brand header + three-column console            */
+/* ================================================================== */
+
+/*
+ * The chat is where a Twitch viewer expects it — pinned right, fixed width —
+ * and the two columns to its left are what a chat cannot show about itself:
+ * what the pipeline decided (left) and whether the Cloudflare side of it is
+ * actually healthy (centre).
+ */
+
+.brand {
+  z-index: 40;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  height: var(--header-h);
+  padding: 0 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.brand__mark {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.brand__logo {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  object-fit: contain;
+}
+
+.brand__name {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.brand__sep {
+  width: 1px;
+  height: 20px;
+  background: var(--line);
+  flex: none;
+}
+
+.brand__tag {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.brand__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 99px;
+  background: var(--brand);
+  color: var(--on-brand);
+  font: 600 13px/1 var(--font);
+  text-decoration: none;
+}
+
+.brand__link:hover {
+  background: var(--brand-hi);
+}
+
+.brand__link svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+.console {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) minmax(440px, 1.45fr) var(--chat-w);
+  flex: 1;
+  min-height: 0;
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.pane__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px 8px;
+  flex: none;
+}
+
+.pane__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.pane__sub {
+  margin: 0;
+  color: var(--dim);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.pane__spacer {
+  flex: 1;
+}
+
+/* ------------------------------------------------------------------ */
+/* left column: the audit feed                                         */
+/* ------------------------------------------------------------------ */
+
+.audit__lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  background: var(--panel);
+  color: var(--muted);
+  font: 600 11px/1 var(--font);
+  cursor: pointer;
+}
+
+.audit__lock svg {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+
+.audit__lock[data-revealed="true"] {
+  border-color: var(--brand);
+  background: var(--brand-wash);
+  color: var(--brand-press);
+}
+
+.audit__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 16px 8px;
+  flex: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  background: var(--panel);
+  color: var(--muted);
+  font: 600 11px/1 var(--font);
+  cursor: pointer;
+}
+
+.chip[aria-pressed="true"] {
+  border-color: var(--brand);
+  background: var(--brand-wash);
+  color: var(--brand-press);
+}
+
+.chip__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--kind, var(--dim));
+  flex: none;
+}
+
+.audit__list {
+  margin: 0;
+  padding: 0 8px 12px;
+  list-style: none;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll) transparent;
+}
+
+/*
+ * A row is grid, not flex: the timestamp column has to line up down the whole
+ * feed or a fast-moving list becomes unreadable.
+ */
+.entry {
+  display: grid;
+  grid-template-columns: 52px 10px 1fr auto;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+
+.entry + .entry {
+  margin-top: 4px;
+}
+
+.entry__time {
+  color: var(--dim);
+  font: 500 11px/1.4 var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.entry__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--kind);
+  align-self: center;
+}
+
+.entry__body {
+  min-width: 0;
+}
+
+.entry__line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+/* Identity is never colour alone: the gate name is spelled out next to the dot. */
+.entry__gate {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--kind-wash, var(--panel-3));
+  color: var(--kind, var(--text));
+  font: 700 10px/1.5 var(--font);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.entry__shard {
+  color: var(--dim);
+  font: 500 11px/1.4 var(--mono);
+}
+
+.entry__user {
+  font-weight: 700;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.entry__reason {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+/* Under a load test the same rule fires hundreds of times a second; collapsing
+   repeats into a counter is what keeps the column readable. */
+.entry__count {
+  padding: 1px 6px;
+  border-radius: 99px;
+  background: var(--panel-3);
+  color: var(--muted);
+  font: 700 10px/1.6 var(--mono);
+  font-variant-numeric: tabular-nums;
+  align-self: center;
+}
+
+.entry--muted .entry__user {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.audit__empty,
+.ops__empty {
+  padding: 14px 10px;
+  color: var(--dim);
+  font-size: 12px;
+  text-align: center;
+}
+
+.audit__gap {
+  margin: 6px 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius);
+  background: var(--warn-wash);
+  color: var(--warn);
+  font: 600 11px/1.4 var(--font);
+  text-align: center;
+}
+
+/* ------------------------------------------------------------------ */
+/* centre column: Cloudflare observability                             */
+/* ------------------------------------------------------------------ */
+
+.ops__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 16px 16px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll) transparent;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.card + .card {
+  margin-top: 12px;
+}
+
+.card__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.card__title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.card__note {
+  color: var(--dim);
+  font-size: 11px;
+  margin-left: auto;
+}
+
+/* The verdict. Status colour is always paired with the word and the icon. */
+.verdict {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.verdict[data-level="ok"] {
+  border-color: color-mix(in srgb, var(--ok) 35%, var(--line));
+  background: var(--ok-wash);
+}
+
+.verdict[data-level="warn"] {
+  border-color: color-mix(in srgb, var(--warn) 35%, var(--line));
+  background: var(--warn-wash);
+}
+
+.verdict[data-level="down"] {
+  border-color: color-mix(in srgb, var(--danger) 35%, var(--line));
+  background: var(--danger-wash);
+}
+
+.verdict__icon {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  fill: var(--dim);
+}
+
+.verdict[data-level="ok"] .verdict__icon {
+  fill: var(--ok);
+}
+.verdict[data-level="warn"] .verdict__icon {
+  fill: var(--warn);
+}
+.verdict[data-level="down"] .verdict__icon {
+  fill: var(--danger);
+}
+
+.verdict__text {
+  min-width: 0;
+}
+
+.verdict__head {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.verdict__checks {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.verdict__check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.verdict__check b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.verdict__check::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+  flex: none;
+}
+
+.verdict__check[data-level="warn"]::before {
+  background: var(--warn);
+}
+.verdict__check[data-level="down"]::before {
+  background: var(--danger);
+}
+
+/* Stat tiles: a headline number needs no plot behind it. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.tile {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.tile__label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.tile__value {
+  margin-top: 2px;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.tile__foot {
+  color: var(--dim);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tile[data-tone="warn"] .tile__value {
+  color: var(--warn);
+}
+.tile[data-tone="down"] .tile__value {
+  color: var(--danger);
+}
+
+/* Sparkline: one series, so the title names it and no legend box is needed. */
+.spark {
+  position: relative;
+  margin-top: 4px;
+}
+
+.spark svg {
+  display: block;
+  width: 100%;
+  height: 68px;
+  overflow: visible;
+}
+
+.spark__area {
+  fill: color-mix(in srgb, var(--brand) 12%, transparent);
+}
+
+.spark__line {
+  fill: none;
+  stroke: var(--brand);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.spark__base {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.spark__cursor {
+  stroke: var(--dim);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+}
+
+.spark__marker {
+  fill: var(--panel);
+  stroke: var(--brand);
+  stroke-width: 2;
+}
+
+.spark__tip {
+  position: absolute;
+  top: 0;
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: var(--tooltip-bg);
+  color: var(--tooltip-fg);
+  font: 600 11px/1.4 var(--font);
+  white-space: nowrap;
+  pointer-events: none;
+  translate: -50% -100%;
+}
+
+.spark__foot {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  color: var(--dim);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Shard table */
+.grid-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.grid-table th {
+  text-align: right;
+  padding: 4px 6px;
+  color: var(--dim);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.grid-table th:first-child,
+.grid-table td:first-child {
+  text-align: left;
+}
+
+.grid-table td {
+  text-align: right;
+  padding: 6px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.grid-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.shard-id {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+
+.shard-id::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  flex: none;
+}
+
+tr[data-reachable="false"] .shard-id::before {
+  background: var(--danger);
+}
+
+tr[data-reachable="false"] td {
+  color: var(--muted);
+}
+
+.cf-note {
+  display: flex;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.cf-note code {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+}
+
+/* ------------------------------------------------------------------ */
+/* narrow screens: the console collapses back to a chat                */
+/* ------------------------------------------------------------------ */
+
+.console__tabs {
+  display: none;
+  flex: none;
+  gap: 4px;
+  padding: 8px 12px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+}
+
+.console__tabs .chip {
+  flex: 1;
+  justify-content: center;
+  height: 32px;
+}
+
+@media (max-width: 1280px) {
+  /* The audit feed is the first thing to fold: it is the column a viewer can
+     live without, and the health verdict is the one they cannot. */
+  .console {
+    grid-template-columns: minmax(420px, 1fr) var(--chat-w);
+  }
+
+  .console[data-view="audit"] {
+    grid-template-columns: minmax(420px, 1fr) var(--chat-w);
+  }
+
+  .console[data-view="audit"] .pane--ops {
+    display: none;
+  }
+
+  .console:not([data-view="audit"]) .pane--audit {
+    display: none;
+  }
+
+  .console__tabs {
+    display: flex;
+  }
+
+  .console__tabs .chip--chat {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  :root {
+    --chat-w: 320px;
+  }
+
+  .console,
+  .console[data-view="audit"] {
+    grid-template-columns: 1fr;
+  }
+
+  .console .pane--audit,
+  .console .pane--ops,
+  .console .chat {
+    display: none;
+  }
+
+  .console[data-view="audit"] .pane--audit,
+  .console[data-view="ops"] .pane--ops {
+    display: flex;
+  }
+
+  .console[data-view="chat"] .chat {
+    display: flex;
+  }
+
+  .chat {
+    border-left: 0;
+  }
+
+  .console__tabs .chip--chat {
+    display: inline-flex;
+  }
+}
+
+@media (max-width: 560px) {
+  .brand__tag,
+  .brand__sep {
+    display: none;
+  }
+}
+
+/* Filtering is a class on the list rather than a re-render: the feed can be
+   500 rows deep and toggling a chip must not rebuild it. */
+.audit__list[data-off~="lifecycle"] .entry[data-cat="lifecycle"],
+.audit__list[data-off~="reject"] .entry[data-cat="reject"],
+.audit__list[data-off~="shadow"] .entry[data-cat="shadow"],
+.audit__list[data-off~="moderation"] .entry[data-cat="moderation"] {
+  display: none;
 }
