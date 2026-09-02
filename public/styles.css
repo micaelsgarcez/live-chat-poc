@@ -381,6 +381,12 @@ button.ghost:hover:not(:disabled) {
   font-variant-numeric: tabular-nums;
 }
 
+/* A display rule on a class outranks the user agent's `[hidden]`, which is how
+   the "room closed" badge stayed on screen while the room was open. */
+[hidden] {
+  display: none !important;
+}
+
 .badge {
   display: inline-block;
   padding: 1px 7px;

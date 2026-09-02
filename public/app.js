@@ -224,6 +224,15 @@ function atBottom() {
   return el.scrollHeight - el.scrollTop - el.clientHeight < 60;
 }
 
+/** History is older than anything on screen, so it goes above it. */
+function prependRow(el) {
+  hideEmptyPlaceholder();
+  dom.messages.prepend(el);
+  while (dom.messages.children.length > MAX_RENDERED_MESSAGES) {
+    dom.messages.lastElementChild?.remove();
+  }
+}
+
 function appendRow(el) {
   hideEmptyPlaceholder();
   const stick = atBottom();
@@ -370,6 +379,48 @@ function onHello(msg) {
   setStatus("online", `connected to ${msg.roomId}`);
   systemLine(`connected as ${msg.name} on shard #${msg.shardIndex}`);
   refreshRanking();
+  loadHistory();
+}
+
+const HISTORY_LIMIT = 50;
+
+/**
+ * A viewer joining a live already in progress should not see an empty room.
+ * Rows already on screen win: the fanout copy is the live one, and `rows.byId`
+ * is what keeps a reconnect from duplicating anything.
+ */
+async function loadHistory() {
+  const roomId = session.roomId;
+  if (!roomId) return;
+  const result = await api(
+    "GET",
+    `/api/rooms/${encodeURIComponent(roomId)}/messages?limit=${HISTORY_LIMIT}`,
+  );
+  if (!result.ok || session.roomId !== roomId) return;
+  const messages = result.data?.messages;
+  if (!Array.isArray(messages) || messages.length === 0) return;
+
+  // The API answers newest first; prepending in that order leaves the oldest
+  // at the top whatever arrived over the socket in the meantime.
+  for (const m of messages) {
+    if (!m?.id || rowForId(m.id)) continue;
+    const row = createRow({
+      cid: null,
+      mine: m.userId === session.userId,
+      author: m.name,
+      roles: m.roles,
+      ts: m.ts,
+      body: m.body,
+      state: "history",
+    });
+    row.id = m.id;
+    row.userId = m.userId;
+    rows.byId.set(m.id, row);
+    if (m.masked) setNote(row, "masked by moderation", "error");
+    addActions(row);
+    prependRow(row.el);
+  }
+  dom.messages.scrollTop = dom.messages.scrollHeight;
 }
 
 function applyConfig(config) {
