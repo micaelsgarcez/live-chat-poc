@@ -4,27 +4,15 @@
  * OWNER CONTRACT:
  *   persistenceSlice    : Slice (`chat-persist` consumer + history routes)
  *   createMessageBuffer : (env, roomId, shardIndex, cfg) => MessageBuffer
- *
- * STUB.
  */
-import type { Env } from "../../env";
 import type { Slice } from "../../shared/slice";
-import type { MessageBuffer } from "../../shared/ports";
-import type { PersistenceConfig } from "../../shared/room-config";
+import { persistQueueConsumer } from "./consumer";
+import { historyRoutes } from "./history";
 
-export function createMessageBuffer(
-  _env: Env,
-  _roomId: string,
-  _shardIndex: number,
-  _config: PersistenceConfig,
-): MessageBuffer {
-  return {
-    add: () => true,
-    addReaction: () => true,
-    size: () => 0,
-    shouldFlush: () => false,
-    flush: async () => 0,
-  };
-}
+export { createMessageBuffer } from "./buffer";
 
-export const persistenceSlice: Slice = { name: "persistence" };
+export const persistenceSlice: Slice = {
+  name: "persistence",
+  routes: historyRoutes,
+  queueConsumers: [persistQueueConsumer],
+};
