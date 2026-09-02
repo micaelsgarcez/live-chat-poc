@@ -107,6 +107,8 @@ O teste rodando contra a produção, com os dados ao vivo na página pública: 4
 espectadores, 40 remetentes, coalescência e amostragem ligadas, e o painel
 mostrando lado a lado o que o gerador abriu e o que a sala relata.
 
+https://github.com/user-attachments/assets/3b09292f-2980-4306-8af8-2b020fddd9ab
+
 ## Como uma mensagem viaja
 
 ```
