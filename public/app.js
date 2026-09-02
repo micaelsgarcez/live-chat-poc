@@ -65,8 +65,13 @@ const $ = (id) => document.getElementById(id);
 const dom = {
   leaveBtn: $("leave-btn"),
   viewers: $("viewers-count"),
-  leaderboard: $("leaderboard"),
-  leaderboardList: $("leaderboard-list"),
+  board: $("board"),
+  boardToggle: $("board-toggle"),
+  boardStripList: $("board-strip-list"),
+  boardPanel: $("board-panel"),
+  boardList: $("board-list"),
+  boardSub: $("board-sub"),
+  boardCollapse: $("board-collapse"),
   pinned: $("pinned"),
   pinnedBody: $("pinned-body"),
   stream: $("stream"),
@@ -1249,33 +1254,83 @@ function closePicker() {
 /* ranking                                                             */
 /* ------------------------------------------------------------------ */
 
+/** Strip when collapsed, full standing when open — one dataset, two shapes. */
 function renderLeaderboard(snapshot) {
-  const top = (snapshot?.top ?? []).slice(0, 8);
-  dom.leaderboard.hidden = top.length === 0;
-  dom.leaderboardList.replaceChildren();
-  top.forEach((entry, index) => {
+  const entries = snapshot?.top ?? [];
+  dom.board.hidden = entries.length === 0;
+  if (entries.length === 0) return;
+
+  dom.boardStripList.replaceChildren();
+  for (const [index, entry] of entries.slice(0, 8).entries()) {
     const li = document.createElement("li");
     const rank = document.createElement("span");
-    rank.className = "leaderboard__rank";
-    rank.textContent = `${index + 1}`;
+    rank.className = "board__rank";
+    rank.textContent = String(index + 1);
     const who = document.createElement("span");
-    who.className = "leaderboard__name";
+    who.className = "board__name";
     who.textContent = entry.name ?? entry.userId;
     who.style.color = colorFor(entry.userId ?? entry.name ?? "");
     const score = document.createElement("span");
-    score.className = "leaderboard__score";
+    score.className = "board__score";
     score.textContent = String(entry.score ?? entry.messages ?? 0);
     li.append(rank, who, score);
-    li.title = `${entry.messages ?? 0} mensagens · ${entry.reactions ?? 0} reações`;
-    dom.leaderboardList.append(li);
-  });
+    dom.boardStripList.append(li);
+  }
+
+  dom.boardList.replaceChildren();
+  for (const [index, entry] of entries.slice(0, 20).entries()) {
+    const place = index + 1;
+    const li = document.createElement("li");
+    li.className = "board__row";
+
+    if (place <= 3) {
+      const medal = document.createElement("span");
+      medal.className = "board__medal";
+      medal.dataset.place = String(place);
+      medal.textContent = String(place);
+      li.append(medal);
+    } else {
+      const number = document.createElement("span");
+      number.className = "board__place";
+      number.textContent = String(place);
+      li.append(number);
+    }
+
+    const who = document.createElement("span");
+    who.className = "board__who";
+    who.textContent = entry.name ?? entry.userId;
+    who.style.color = colorFor(entry.userId ?? entry.name ?? "");
+
+    const metric = document.createElement("span");
+    metric.className = "board__metric";
+    metric.innerHTML = '<svg aria-hidden="true"><use href="#i-bubble" /></svg>';
+    const count = document.createElement("span");
+    count.textContent = String(entry.score ?? entry.messages ?? 0);
+    metric.append(count);
+
+    li.title = `${entry.messages ?? 0} mensagens, ${entry.reactions ?? 0} reações`;
+    li.append(who, metric);
+    dom.boardList.append(li);
+  }
+
+  const windowMinutes = Math.round((snapshot?.windowMs ?? 900_000) / 60_000);
+  dom.boardSub.textContent = `Últimos ${windowMinutes} minutos`;
+}
+
+function toggleBoard(open) {
+  const next = open ?? dom.boardPanel.hidden;
+  dom.boardPanel.hidden = !next;
+  // The panel carries its own title, so the strip would only repeat itself.
+  dom.boardToggle.hidden = next;
+  dom.boardToggle.setAttribute("aria-expanded", String(next));
+  if (!next) dom.boardToggle.focus();
 }
 
 async function refreshRanking() {
   if (!session.roomId) return;
   const result = await api("GET", `/api/rooms/${encodeURIComponent(session.roomId)}/ranking`);
   if (!result.ok) {
-    dom.leaderboard.hidden = true;
+    dom.board.hidden = true;
     return;
   }
   renderLeaderboard(result.data?.ranking ?? result.data?.snapshot ?? result.data);
@@ -1351,6 +1406,9 @@ dom.joinForm.addEventListener("submit", async (event) => {
   setHint(dom.joinHint, "Entrando…");
   await connectAs({ anonymous: false, userId: name });
 });
+
+dom.boardToggle.addEventListener("click", () => toggleBoard());
+dom.boardCollapse.addEventListener("click", () => toggleBoard(false));
 
 dom.gateBtn.addEventListener("click", () => {
   dom.picker.hidden = true;
@@ -1464,7 +1522,9 @@ async function watchAnonymously() {
 }
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !dom.join.hidden) dom.join.hidden = true;
+  if (event.key !== "Escape") return;
+  if (!dom.join.hidden) dom.join.hidden = true;
+  else if (!dom.boardPanel.hidden) toggleBoard(false);
 });
 
 applyGate();

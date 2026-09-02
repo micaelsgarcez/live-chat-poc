@@ -57,6 +57,9 @@
         <symbol id="i-pin" viewBox="0 0 20 20">
           <path d="M12.2 2.5 17.5 7.8l-1.3 1.3-.8-.3-2.7 2.7.4 2.6-1.2 1.2-3.1-3.1-3.9 3.9-.9-.9 3.9-3.9-3.1-3.1L6 7l2.6.4L11.3 4.6l-.3-.8z" />
         </symbol>
+        <symbol id="i-bubble" viewBox="0 0 20 20">
+          <path d="M4 3.4h12a1.6 1.6 0 0 1 1.6 1.6v7.6a1.6 1.6 0 0 1-1.6 1.6H8.9l-3.6 2.9a.6.6 0 0 1-1-.47V14.2H4a1.6 1.6 0 0 1-1.6-1.6V5A1.6 1.6 0 0 1 4 3.4Z" />
+        </symbol>
         <symbol id="i-crown" viewBox="0 0 20 20">
           <path d="M3 6.2 6.4 9 10 3.6 13.6 9 17 6.2l-1.4 8.6H4.4Zm1.4 10h11.2v1.8H4.4Z" />
         </symbol>
@@ -78,10 +81,36 @@
         </span>
       </header>
 
-      <div class="leaderboard" id="leaderboard" hidden>
-        <svg class="leaderboard__crown" aria-hidden="true"><use href="#i-crown" /></svg>
-        <ol class="leaderboard__list" id="leaderboard-list" aria-label="Quem mais falou nos últimos 15 minutos"></ol>
-      </div>
+      <section class="board" id="board" hidden>
+        <button
+          class="board__strip"
+          id="board-toggle"
+          type="button"
+          aria-expanded="false"
+          aria-controls="board-panel"
+        >
+          <svg class="board__crown" aria-hidden="true"><use href="#i-crown" /></svg>
+          <ol class="board__strip-list" id="board-strip-list"></ol>
+          <svg class="board__caret" aria-hidden="true"><use href="#i-chevron" /></svg>
+        </button>
+
+        <div class="board__panel" id="board-panel" hidden>
+          <p class="board__title">Quem mais falou</p>
+          <p class="board__sub" id="board-sub">Últimos 15 minutos</p>
+          <button
+            class="board__collapse"
+            id="board-collapse"
+            type="button"
+            data-tip="Recolher"
+            data-tip-below
+            aria-label="Recolher o ranking"
+          >
+            <svg aria-hidden="true"><use href="#i-chevron" /></svg>
+          </button>
+          <ol class="board__list" id="board-list"></ol>
+          <p class="board__foot">1 ponto por mensagem, 3 por reação</p>
+        </div>
+      </section>
 
       <div class="pinned" id="pinned" hidden>
         <svg class="pinned__icon" aria-hidden="true"><use href="#i-pin" /></svg>
