@@ -12,6 +12,7 @@ import { authSlice } from "./auth";
 import { banSlice } from "./ban";
 import { connectSlice } from "./connect";
 import { moderationSlice, moderationGate } from "./moderation";
+import { observabilitySlice } from "./observability";
 import { persistenceSlice } from "./persistence";
 import { rankingSlice } from "./ranking";
 import { rateLimitSlice, rateLimitGate } from "./rate-limit";
@@ -33,6 +34,7 @@ export const slices: readonly Slice[] = [
   moderationSlice,
   persistenceSlice,
   rankingSlice,
+  observabilitySlice,
 ];
 
 /**
