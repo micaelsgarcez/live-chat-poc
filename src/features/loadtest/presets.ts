@@ -17,6 +17,9 @@ export interface LoadTestPreset {
   connections: number;
   talkers: number;
   shards: number;
+  shardCount: number;
+  maxSocketsPerShard: number;
+  fanout: { scope: "room" | "subroom" };
   machines: number;
   rampSeconds: number;
   holdSeconds: number;
@@ -25,12 +28,12 @@ export interface LoadTestPreset {
 const SHAPE = { rampSeconds: 60, holdSeconds: 30 };
 
 export const LOADTEST_PRESETS: readonly LoadTestPreset[] = [
-  { name: "smoke", connections: 1_000, talkers: 200, shards: 1, machines: 1, ...SHAPE },
-  { name: "small", connections: 10_000, talkers: 2_000, shards: 2, machines: 1, ...SHAPE },
-  { name: "medium", connections: 50_000, talkers: 10_000, shards: 10, machines: 5, ...SHAPE },
-  { name: "large", connections: 100_000, talkers: 20_000, shards: 20, machines: 10, ...SHAPE },
-  { name: "xlarge", connections: 200_000, talkers: 35_000, shards: 40, machines: 20, ...SHAPE },
-  { name: "max", connections: 300_000, talkers: 50_000, shards: 60, machines: 30, ...SHAPE },
+  { name: "smoke", connections: 1_000, talkers: 200, shards: 1, shardCount: 1, maxSocketsPerShard: 5_000, fanout: { scope: "room" }, machines: 1, ...SHAPE },
+  { name: "small", connections: 10_000, talkers: 2_000, shards: 2, shardCount: 2, maxSocketsPerShard: 5_000, fanout: { scope: "room" }, machines: 1, ...SHAPE },
+  { name: "medium", connections: 50_000, talkers: 10_000, shards: 25, shardCount: 1, maxSocketsPerShard: 2_000, fanout: { scope: "subroom" }, machines: 5, ...SHAPE },
+  { name: "large", connections: 100_000, talkers: 20_000, shards: 50, shardCount: 1, maxSocketsPerShard: 2_000, fanout: { scope: "subroom" }, machines: 10, ...SHAPE },
+  { name: "xlarge", connections: 200_000, talkers: 35_000, shards: 100, shardCount: 1, maxSocketsPerShard: 2_000, fanout: { scope: "subroom" }, machines: 20, ...SHAPE },
+  { name: "max", connections: 300_000, talkers: 50_000, shards: 150, shardCount: 1, maxSocketsPerShard: 2_000, fanout: { scope: "subroom" }, machines: 30, ...SHAPE },
 ];
 
 export function findPreset(name: string): LoadTestPreset | null {

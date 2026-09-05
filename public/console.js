@@ -89,6 +89,7 @@ const el = {
   shardsBody: $("shards-body"),
   shardsNote: $("shards-note"),
   shardsEmpty: $("shards-empty"),
+  shardsColumnTitle: $("shards-column-title"),
   cfNote: $("cf-note"),
   cfBody: $("cf-body"),
   loadtest: $("loadtest"),
@@ -347,6 +348,7 @@ function tile(label, value, foot, tone) {
 
 function renderTiles(snapshot) {
   const { totals, stats } = snapshot;
+  const subrooms = snapshot.scope === "subroom";
   const stalledPersistence =
     snapshot.health.checks.find((check) => check.id === "persistence")?.level !== "ok";
   const inbound = totals.accepted + totals.rejected;
@@ -371,7 +373,7 @@ function renderTiles(snapshot) {
     ),
     tile("Publicadas", compact(totals.messagesPublished), "fanout do coordinator"),
     tile(
-      "Shards",
+      subrooms ? "Sub-salas" : "Shards",
       `${totals.shardsReachable}/${totals.shardsRegistered}`,
       `config v${stats?.configVersion ?? "—"}`,
       totals.shardsReachable < totals.shardsRegistered ? "warn" : undefined,
@@ -379,9 +381,13 @@ function renderTiles(snapshot) {
   );
 }
 
-function renderShards(shards) {
+function renderShards(shards, subrooms) {
   el.shardsEmpty.hidden = shards.length > 0;
-  el.shardsNote.textContent = shards.length === 0 ? "—" : `${shards.length} registrado(s)`;
+  el.shardsColumnTitle.textContent = subrooms ? "Sub-sala" : "Shard";
+  el.shardsNote.textContent =
+    shards.length === 0
+      ? "—"
+      : `${shards.length} ${subrooms ? "sub-sala(s)" : "shard(s)"} registrada(s)`;
   el.shardsBody.replaceChildren(
     ...shards.map((shard) => {
       const row = document.createElement("tr");
@@ -602,11 +608,12 @@ function applySnapshot(snapshot) {
 
   renderVerdict(snapshot.health);
   renderTiles(snapshot);
-  renderShards(snapshot.shards);
+  renderShards(snapshot.shards, snapshot.scope === "subroom");
   pushSample(snapshot.shards, snapshot.now);
   if (!state.frozen) renderSpark();
 
-  el.opsSub.textContent = `sala ${snapshot.roomId} · ${snapshot.totals.shardsReachable} shard(s) respondendo · atualiza a cada 1s`;
+  const subrooms = snapshot.scope === "subroom";
+  el.opsSub.textContent = `sala ${snapshot.roomId} · modo: ${subrooms ? "sub-salas" : "sala inteira"} · ${snapshot.totals.shardsReachable} ${subrooms ? "sub-sala(s)" : "shard(s)"} respondendo · atualiza a cada 1s`;
 }
 
 async function poll() {

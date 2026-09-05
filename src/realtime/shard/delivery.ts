@@ -81,10 +81,22 @@ function isChat(event: ServerEvent): event is ServerChat {
  * `rng` is injectable so a test can pin the shuffle; production passes
  * `Math.random`, and the shuffle only has to be unbiased, not unguessable.
  */
-export function planDelivery(events: ServerEvent[], rng: () => number = Math.random): DeliveryPlan {
+export function planDelivery(
+  events: ServerEvent[],
+  options: { privilegedRoles?: readonly string[] } = {},
+  rng: () => number = Math.random,
+): DeliveryPlan {
+  const privilegedRoles = new Set(options.privilegedRoles ?? []);
   const chatIndices: number[] = [];
+  const protectedIndices = new Set<number>();
   for (let i = 0; i < events.length; i++) {
-    if (isChat(events[i]!)) chatIndices.push(i);
+    const event = events[i]!;
+    if (!isChat(event)) continue;
+    if (event.m.roomWide || event.m.roles?.some((role) => privilegedRoles.has(role))) {
+      protectedIndices.add(i);
+    } else {
+      chatIndices.push(i);
+    }
   }
   const chatCount = chatIndices.length;
 
@@ -115,10 +127,14 @@ export function planDelivery(events: ServerEvent[], rng: () => number = Math.ran
 
       const kept: ServerEvent[] = [];
       let seen = 0;
-      for (const event of events) {
+      for (let index = 0; index < events.length; index++) {
+        const event = events[index]!;
         if (isChat(event)) {
-          if (rank[seen]! < budget) kept.push(event);
-          seen++;
+          if (protectedIndices.has(index)) kept.push(event);
+          else {
+            if (rank[seen]! < budget) kept.push(event);
+            seen++;
+          }
         } else {
           kept.push(event);
         }
@@ -145,8 +161,10 @@ export function planDelivery(events: ServerEvent[], rng: () => number = Math.ran
       if (budget >= chatCount) return [];
       const missing: ServerChat[] = [];
       let seen = 0;
-      for (const event of events) {
+      for (let index = 0; index < events.length; index++) {
+        const event = events[index]!;
         if (!isChat(event)) continue;
+        if (protectedIndices.has(index)) continue;
         if (rank[seen]! >= budget && event.m.userId === userId) missing.push(event);
         seen++;
       }

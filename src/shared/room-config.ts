@@ -67,6 +67,11 @@ export interface PersistenceConfig {
  */
 export interface FanoutConfig {
   /**
+   * Room-wide preserves the original broadcast contract. Subroom keeps common
+   * conversation on its shard so the coordinator is not the hot-path ceiling.
+   */
+  scope: "room" | "subroom";
+  /**
    * Coalescing window at the coordinator, in ms. 0 publishes each message on
    * its own. The delay is paid by *viewers*, never by the sender: the shard
    * acks before the coordinator flushes.
@@ -109,6 +114,7 @@ export type RoomConfigPatch = Partial<
     | "slowModeMs"
     | "maxMessageLength"
     | "shardCount"
+    | "maxSocketsPerShard"
     | "rateLimit"
     | "spam"
     | "moderation"
@@ -156,7 +162,13 @@ export function defaultRoomConfig(roomId: string, shardCount = 4): RoomConfig {
     },
     // Off: a room only pays for batching and sampling once it is big enough to
     // need them, and a default that changes delivery would be a surprise.
-    fanout: { batchWindowMs: 0, maxPerViewerPerSecond: 0, alwaysDeliverOwn: true },
+    fanout: {
+      // Existing rooms stay room-wide until an operator opts into subrooms.
+      scope: "room",
+      batchWindowMs: 0,
+      maxPerViewerPerSecond: 0,
+      alwaysDeliverOwn: true,
+    },
     privilegedRoles: ["moderator", "admin", "system"],
   };
 }
@@ -205,6 +217,7 @@ export function toPublicConfig(config: RoomConfig): PublicRoomConfig {
     slowModeMs: config.slowModeMs,
     maxMessageLength: config.maxMessageLength,
     closed: config.closed,
+    scope: config.fanout.scope,
     maxDeliveredPerSecond: config.fanout.maxPerViewerPerSecond,
   };
 }

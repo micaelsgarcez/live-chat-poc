@@ -181,6 +181,7 @@ describe("RoomCoordinator", () => {
       expect(stats.roomId).toBe("stats-room");
       expect(stats.registeredShards).toEqual([0, 3]);
       expect(stats.connections).toBe(42);
+      expect(stats.averageSubRoomOccupancy).toBe(21);
       expect(stats.messagesPublished).toBe(1);
       expect(stats.configVersion).toBeGreaterThan(0);
     });
@@ -228,6 +229,44 @@ describe("RoomCoordinator", () => {
       await coordinator.reportPresence(0, 0);
       await coordinator.alarm();
       expect((await coordinator.getConfig()).shardCount).toBe(config.shardCount);
+    });
+  });
+
+  it("adopts a shard opened past the published placement count", async () => {
+    await withCoordinator("probe-growth-room", async (coordinator, fleet) => {
+      const initial = await coordinator.init("probe-growth-room");
+      const openedIndex = initial.shardCount;
+
+      const adopted = await coordinator.registerShard("probe-growth-room", openedIndex);
+
+      expect(adopted.shardCount).toBe(openedIndex + 1);
+      expect(await getShardCount(env, "probe-growth-room")).toBe(openedIndex + 1);
+      expect(fleet.of(openedIndex, "applyConfig")[0]?.config?.shardCount).toBe(openedIndex + 1);
+    });
+  });
+
+  it("keeps privileged publishes room-wide while subrooms are enabled", async () => {
+    await withCoordinator("privileged-room", async (coordinator, fleet) => {
+      await coordinator.registerShard("privileged-room", 0);
+      await coordinator.registerShard("privileged-room", 1);
+      await coordinator.updateConfig({ fanout: { scope: "subroom" } as RoomConfig["fanout"] });
+      fleet.calls.length = 0;
+      const privileged = { ...message("privileged-room", "announcement"), roles: ["moderator"] };
+
+      await coordinator.publish({ message: privileged, originShardIndex: 0 });
+
+      expect(fleet.of(0, "fanout")[0]?.events?.[0]).toMatchObject({ t: "msg", m: privileged });
+      expect(fleet.of(1, "fanout")[0]?.events?.[0]).toMatchObject({ t: "msg", m: privileged });
+    });
+  });
+
+  it("normalizes an invalid fanout scope to room", async () => {
+    await withCoordinator("invalid-scope-room", async (coordinator) => {
+      await coordinator.init("invalid-scope-room");
+      const config = await coordinator.updateConfig({
+        fanout: { scope: "somewhere-else" } as unknown as RoomConfig["fanout"],
+      });
+      expect(config.fanout.scope).toBe("room");
     });
   });
 

@@ -95,6 +95,17 @@ async function until(
 const settle = (ms = 50): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
+async function configureSubrooms(
+  room: string,
+  fanout: Partial<RoomConfig["fanout"]> = {},
+): Promise<void> {
+  const coordinator = coordinatorStub(room);
+  await coordinator.init(room);
+  await coordinator.updateConfig({
+    fanout: { scope: "subroom", ...fanout } as RoomConfig["fanout"],
+  });
+}
+
 describe("ChatShard delivery", () => {
   it("delivers a message to another client on the same shard", async () => {
     const room = "shard-same";
@@ -135,6 +146,51 @@ describe("ChatShard delivery", () => {
     const stub = shardStub(room, shardOf(room, alive));
     await expect(stub.fanout([{ t: "sys", code: "still-here" }])).resolves.toBeGreaterThan(0);
     await until(() => a.all("sys").some((m) => m.code === "still-here"));
+  });
+
+  it("acks before flushing a local coalescing window", async () => {
+    const room = "shard-local-window";
+    await configureSubrooms(room, { batchWindowMs: 500 });
+    const [sender, receiver] = pickUsers(room, true);
+    const a = await TestClient.connectAs(room, sender);
+    const b = await TestClient.connectAs(room, receiver);
+    await Promise.all([a.waitFor("hello"), b.waitFor("hello")]);
+
+    a.send({ t: "send", cid: "local", body: "wait in shard" });
+    expect((await a.waitFor("ack")).cid).toBe("local");
+    await settle(100);
+    expect(b.all("msg")).toHaveLength(0);
+    expect((await b.waitFor("msg")).m.body).toBe("wait in shard");
+  });
+
+  it("flushes pending local chat before an external event", async () => {
+    const room = "shard-local-order";
+    await configureSubrooms(room, { batchWindowMs: 800 });
+    const user = "ordered-user";
+    const client = await TestClient.connectAs(room, user);
+    const hello = await client.waitFor("hello");
+
+    client.send({ t: "send", cid: "local", body: "first" });
+    await client.waitFor("ack");
+    await shardStub(room, hello.shardIndex).fanout([{ t: "sys", code: "second" }]);
+    await until(() => client.all("sys").some((event) => event.code === "second"));
+
+    const ordered = client.received.filter((event) => event.t === "msg" || event.t === "sys");
+    expect(ordered.map((event) => event.t)).toEqual(["msg", "sys"]);
+  });
+
+  it("adds local occupancy to room-wide presence", async () => {
+    const room = "shard-sub-presence";
+    const [first, second] = pickUsers(room, true);
+    const a = await TestClient.connectAs(room, first);
+    const b = await TestClient.connectAs(room, second);
+    const hello = await a.waitFor("hello");
+    await b.waitFor("hello");
+
+    await shardStub(room, hello.shardIndex).fanout([{ t: "presence", count: 17 }]);
+    const presence = await a.waitFor("presence");
+    expect(presence.count).toBe(17);
+    expect(presence.sub).toBe(2);
   });
 });
 
@@ -184,6 +240,20 @@ describe("ChatShard client frames", () => {
     expect(a.all("rejected")).toHaveLength(0);
     const stats = await shardStub(room, shardOf(room, sender)).getStats();
     expect(stats.acceptedCount).toBe(0);
+  });
+
+  it("keeps reactions inside the subroom", async () => {
+    const room = "shard-local-reaction";
+    await configureSubrooms(room);
+    const [sender, otherSubroom] = pickUsers(room, false);
+    const a = await TestClient.connectAs(room, sender);
+    const b = await TestClient.connectAs(room, otherSubroom);
+    await Promise.all([a.waitFor("hello"), b.waitFor("hello")]);
+
+    a.send({ t: "react", cid: "r-local", messageId: "m-local", emoji: "👍" });
+    expect((await a.waitFor("reaction")).messageId).toBe("m-local");
+    await settle(100);
+    expect(b.all("reaction")).toHaveLength(0);
   });
 
   it("rejects with INTERNAL when the coordinator cannot take the message", async () => {

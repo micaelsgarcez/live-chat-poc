@@ -107,6 +107,7 @@ const dom = {
   factConfig: $("fact-config"),
   modForm: $("mod-form"),
   slowModeInput: $("slowmode-input"),
+  subroomInput: $("subroom-input"),
   closedInput: $("closed-input"),
   gate: $("gate"),
   gateBtn: $("gate-btn"),
@@ -139,6 +140,8 @@ const session = {
   /** Last measured round trip; the console feeds it into the health verdict. */
   latencyMs: 0,
   config: null,
+  shardIndex: 0,
+  selectedSub: null,
   seq: 0,
   replyTo: null,
   pickerTab: "emotes",
@@ -466,6 +469,15 @@ function createRow({ cid, author, userId, roles, ts, body, state, replyTo }) {
   return row;
 }
 
+function markRoomWide(row) {
+  if (row.el.querySelector(".msg__wide")) return;
+  const badge = document.createElement("span");
+  badge.className = "msg__wide";
+  badge.textContent = "para todos";
+  badge.title = "Mensagem enviada a todas as sub-salas";
+  row.bodyEl.before(badge);
+}
+
 /** Inserts or replaces the quoted parent above a row. */
 function setReplyBlock(row, ref) {
   const existing = row.el.querySelector(".msg__reply");
@@ -632,10 +644,12 @@ function onHello(msg) {
   session.userId = msg.userId;
   session.name = msg.name;
   session.roles = msg.roles ?? [];
+  session.shardIndex = msg.shardIndex;
   session.attempt = 0;
   applyConfig(msg.config);
   dom.factUser.textContent = `${msg.name} (${msg.userId})`;
   dom.factShard.textContent = `#${msg.shardIndex}`;
+  dom.subroomInput.value = String(msg.shardIndex);
   dom.modForm.hidden = !isPrivileged();
   dom.join.hidden = true;
   dom.leaveBtn.classList.toggle("is-invisible", session.anonymous);
@@ -706,6 +720,7 @@ function onChat(m) {
       addTools(known);
     }
     if (m.masked) setNote(known, "editada pela moderação", "error");
+    if (m.roomWide) markRoomWide(known);
     return;
   }
 
@@ -722,6 +737,7 @@ function onChat(m) {
   row.id = m.id;
   rows.byId.set(m.id, row);
   if (m.masked) setNote(row, "editada pela moderação", "error");
+  if (m.roomWide) markRoomWide(row);
   addTools(row);
   appendRow(row.el);
 }
@@ -776,7 +792,10 @@ function onReaction(msg) {
 }
 
 function onPresence(msg) {
-  dom.viewers.textContent = String(msg.count);
+  dom.viewers.textContent =
+    session.config?.scope === "subroom" && typeof msg.sub === "number"
+      ? `${msg.count} assistindo · sala #${session.shardIndex} · ${msg.sub} aqui`
+      : String(msg.count);
 }
 
 /**
@@ -876,7 +895,7 @@ async function loadHistory() {
   const roomId = session.roomId;
   const result = await api(
     "GET",
-    `/api/rooms/${encodeURIComponent(roomId)}/messages?limit=${HISTORY_LIMIT}`,
+    `/api/rooms/${encodeURIComponent(roomId)}/messages?limit=${HISTORY_LIMIT}${session.config?.scope === "subroom" ? `&sub=${session.shardIndex}` : ""}`,
   );
   if (!result.ok || session.roomId !== roomId) return;
   const messages = result.data?.messages;
@@ -900,6 +919,7 @@ async function loadHistory() {
     row.id = m.id;
     rows.byId.set(m.id, row);
     if (m.masked) setNote(row, "editada pela moderação", "error");
+    if (m.roomWide) markRoomWide(row);
     addTools(row);
     prependRow(row.el);
   }
@@ -930,7 +950,10 @@ async function mintToken() {
 
 function socketUrl() {
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
-  return `${scheme}//${location.host}/ws/${encodeURIComponent(session.roomId)}?token=${encodeURIComponent(session.token)}`;
+  const url = new URL(`${scheme}//${location.host}/ws/${encodeURIComponent(session.roomId)}`);
+  url.searchParams.set("token", session.token);
+  if (session.selectedSub !== null) url.searchParams.set("sub", String(session.selectedSub));
+  return url.toString();
 }
 
 function setComposerEnabled(enabled) {
@@ -1042,6 +1065,7 @@ function resetStream() {
 async function connectAs({ anonymous, userId }) {
   closeSocket();
   resetStream();
+  session.selectedSub = null;
   session.anonymous = anonymous;
   session.roomId = ROOM_ID;
   session.userId = userId;
@@ -1581,6 +1605,17 @@ dom.settingsClose.addEventListener("click", () => {
   dom.settingsBtn.setAttribute("aria-expanded", "false");
 });
 dom.modForm.addEventListener("submit", applyRoomConfig);
+dom.subroomInput.addEventListener("change", () => {
+  if (!isPrivileged()) return;
+  const next = Number(dom.subroomInput.value);
+  if (!Number.isInteger(next) || next < 0 || next === session.shardIndex) return;
+  session.selectedSub = next;
+  resetStream();
+  const previous = session.ws;
+  session.ws = null;
+  previous?.close(1000, "mudando de sub-sala");
+  void openSocket();
+});
 
 document.addEventListener("keydown", (event) => {
   if (event.key !== "Escape") return;

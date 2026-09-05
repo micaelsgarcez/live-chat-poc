@@ -53,6 +53,8 @@ export function estimateCost({
   shardCount,
   batchWindowMs,
   runSeconds,
+  scope = "room",
+  privilegedMessages = 0,
 }) {
   const workerRequests = handshakes;
 
@@ -60,11 +62,12 @@ export function estimateCost({
 
   // With a window, N messages in the window cost one call per shard instead of
   // N. Without one, every message pays for every shard.
+  const fanoutMessages = scope === "subroom" ? privilegedMessages : publishedMessages;
   const batches =
     batchWindowMs > 0
       ? Math.max(1, Math.ceil((runSeconds * 1000) / batchWindowMs))
-      : publishedMessages;
-  const fanoutDoRequests = Math.min(publishedMessages, batches) * shardCount;
+      : fanoutMessages;
+  const fanoutDoRequests = Math.min(fanoutMessages, batches) * shardCount;
 
   const objectsAlive = shardCount + 1;
   const gbSeconds = objectsAlive * PRICING.durableObjectMemoryGb * runSeconds;
@@ -84,7 +87,7 @@ export function estimateCost({
       durableObjectRequests: doRequests,
       inboundDoRequests,
       fanoutDoRequests,
-      fanoutBatches: Math.min(publishedMessages, batches),
+      fanoutBatches: Math.min(fanoutMessages, batches),
       gbSeconds: Math.round(gbSeconds * 100) / 100,
     },
     usd: Object.fromEntries(

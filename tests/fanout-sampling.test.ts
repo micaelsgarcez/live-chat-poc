@@ -50,7 +50,7 @@ describe("fanout coalescing", () => {
     const room = "fanout-coalesce";
     await configure(room, {
       ...OPEN_GATES,
-      fanout: { batchWindowMs: 120, maxPerViewerPerSecond: 0, alwaysDeliverOwn: true },
+      fanout: { scope: "room", batchWindowMs: 120, maxPerViewerPerSecond: 0, alwaysDeliverOwn: true },
     });
 
     const talker = await TestClient.connectAs(room, "coalesce-talker");
@@ -73,7 +73,7 @@ describe("fanout coalescing", () => {
     const room = "fanout-ack-latency";
     await configure(room, {
       ...OPEN_GATES,
-      fanout: { batchWindowMs: 800, maxPerViewerPerSecond: 0, alwaysDeliverOwn: true },
+      fanout: { scope: "room", batchWindowMs: 800, maxPerViewerPerSecond: 0, alwaysDeliverOwn: true },
     });
 
     const talker = await TestClient.connectAs(room, "ack-talker");
@@ -93,7 +93,7 @@ describe("per-viewer sampling", () => {
     const room = "fanout-sampled";
     await configure(room, {
       ...OPEN_GATES,
-      fanout: { batchWindowMs: 120, maxPerViewerPerSecond: 2, alwaysDeliverOwn: true },
+      fanout: { scope: "room", batchWindowMs: 120, maxPerViewerPerSecond: 2, alwaysDeliverOwn: true },
     });
 
     const talker = await TestClient.connectAs(room, "sample-talker");
@@ -121,7 +121,7 @@ describe("per-viewer sampling", () => {
     const room = "fanout-own";
     await configure(room, {
       ...OPEN_GATES,
-      fanout: { batchWindowMs: 120, maxPerViewerPerSecond: 1, alwaysDeliverOwn: true },
+      fanout: { scope: "room", batchWindowMs: 120, maxPerViewerPerSecond: 1, alwaysDeliverOwn: true },
     });
 
     const talker = await TestClient.connectAs(room, "own-talker");
@@ -154,7 +154,7 @@ describe("per-viewer sampling", () => {
   it("publishes the cap so a client can tell the viewer it is being sampled", async () => {
     const room = "fanout-public-config";
     await configure(room, {
-      fanout: { batchWindowMs: 0, maxPerViewerPerSecond: 20, alwaysDeliverOwn: true },
+      fanout: { scope: "room", batchWindowMs: 0, maxPerViewerPerSecond: 20, alwaysDeliverOwn: true },
     });
     const client = await TestClient.connectAs(room, "config-reader");
     const hello = await client.waitFor("hello");

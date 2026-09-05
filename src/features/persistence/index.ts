@@ -4,7 +4,7 @@
  * OWNER CONTRACT:
  *   persistenceSlice    : Slice (`chat-persist` consumer + history routes)
  *   createMessageBuffer : (env, roomId, shardIndex, cfg) => MessageBuffer
- *   listRoomMessages    : (env, roomId, limit, cursor) => Promise<HistoryPage>
+ *   listRoomMessages    : (env, roomId, limit, cursor, { shardIndex? }?) => Promise<HistoryPage>
  */
 import type { Slice } from "../../shared/slice";
 import { persistQueueConsumer } from "./consumer";

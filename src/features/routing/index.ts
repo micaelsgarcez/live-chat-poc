@@ -21,6 +21,23 @@ export function selectShardIndex(placementKey: string, shardCount: number): numb
   return bucketOf(placementKey, Math.max(1, shardCount));
 }
 
+/** Ordered failover targets: probe existing subrooms, then open the next one. */
+export function placementCandidates(
+  placementKey: string,
+  shardCount: number,
+  maxProbes = 3,
+): number[] {
+  const count = Math.max(1, Math.floor(shardCount));
+  const first = selectShardIndex(placementKey, count);
+  const candidates: number[] = [];
+  for (let offset = 0; offset < Math.max(1, Math.floor(maxProbes)); offset++) {
+    const candidate = (first + offset) % count;
+    if (!candidates.includes(candidate)) candidates.push(candidate);
+  }
+  candidates.push(count);
+  return candidates;
+}
+
 export async function getShardCount(env: Env, roomId: string): Promise<number> {
   const fallback = intVar(env.DEFAULT_SHARD_COUNT, 4);
   const raw = await env.CHAT_KV.get(shardCountKey(roomId), {

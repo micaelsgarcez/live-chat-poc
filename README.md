@@ -128,6 +128,27 @@ Fora do caminho quente: `chat-persist` grava lotes em D1, `chat-moderation` faz
 a revisão pesada e emite delete retroativo, e o Cron (mais o alarm do
 coordinator) recalcula o ranking para o KV.
 
+## Sub-salas
+
+Sub-salas são um modo opt-in para lives em que o fanout global virou o teto. Um
+`ChatShard` passa a ser uma sub-sala: mensagens e reações comuns ficam entre os
+sockets daquele shard, são confirmadas ali e não esperam o `RoomCoordinator`.
+Ative em runtime, começando por uma sub-sala e deixando a ocupação abrir as
+próximas automaticamente:
+
+```bash
+curl -X PATCH https://<seu-worker>/api/rooms/<sala>/config \
+  -H "x-moderator-key: $MODERATOR_API_KEY" -H 'content-type: application/json' \
+  -d '{"fanout":{"scope":"subroom"},"shardCount":1,"maxSocketsPerShard":2000}'
+```
+
+Mensagens de moderador, admin e sistema continuam passando pelo coordinator e
+chegam a todos, assim como delete retroativo, ban, configuração e presença
+total. Mensagens comuns, reações, respostas e menções ficam locais. O cliente
+mostra o total da live e quantas pessoas estão na sub-sala; papéis privilegiados
+podem escolher uma com `?sub=N`. O histórico aceita o mesmo filtro, enquanto a
+consulta sem `sub` preserva a visão global de moderação.
+
 ## Endpoints
 
 | Método | Rota | O quê |
@@ -138,7 +159,7 @@ coordinator) recalcula o ranking para o KV.
 | GET | `/api/me` | identidade do token apresentado |
 | GET/PATCH | `/api/rooms/:roomId/config` | configuração da sala (PATCH = moderador) |
 | GET | `/api/rooms/:roomId/stats` | shards registrados, presença, contadores |
-| GET | `/api/rooms/:roomId/messages` | histórico paginado (`limit`, `before`), com a citação da resposta |
+| GET | `/api/rooms/:roomId/messages` | histórico paginado (`limit`, `before`, `sub`), com a citação da resposta |
 | GET | `/api/rooms/:roomId/ranking` | ranking pronto do KV (`?refresh=1` recalcula) |
 | GET/POST | `/api/rooms/:roomId/bans` | listar / aplicar ban (moderador) |
 | DELETE | `/api/rooms/:roomId/bans/:userId` | remover ban |

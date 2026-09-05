@@ -14,14 +14,16 @@ import { problem, bearerToken, clientIp, type RouteDef } from "../../shared/http
 import {
   CONNECT_METADATA_HEADER,
   encodeConnectMetadata,
+  hasRole,
   type ConnectMetadata,
 } from "../../shared/identity";
 import { newConnectionId, shardName } from "../../shared/ids";
+import { defaultRoomConfig } from "../../shared/room-config";
 import type { Slice } from "../../shared/slice";
 import { authenticate } from "../auth";
 import { checkBan } from "../ban";
 import { checkEdgeRateLimit, hasLoadTestBypass } from "../rate-limit";
-import { getShardCount, selectShardIndex } from "../routing";
+import { getShardCount, placementCandidates } from "../routing";
 
 export async function handleConnect(
   req: Request,
@@ -59,22 +61,36 @@ export async function handleConnect(
 
   const shardCount = await getShardCount(env, roomId);
   const connectionId = newConnectionId();
-  // Placing by user id keeps a reconnecting user on the same shard, which keeps
-  // their per-user gate state (slow-mode, token bucket) warm.
-  const shardIndex = selectShardIndex(`${roomId}:${identity.userId}`, shardCount);
+  const placementKey = `${roomId}:${identity.userId}`;
+  const requestedSub = Number.parseInt(new URL(req.url).searchParams.get("sub") ?? "", 10);
+  // Config lives in the coordinator and the edge deliberately does not ask it
+  // on connect. Dynamic privileged roles therefore cannot select a subroom;
+  // moderator, admin and system can because they are privileged by default.
+  const mayChooseSub = hasRole(identity, defaultRoomConfig(roomId).privilegedRoles);
+  // Bounded to the next subroom at most: a moderator may look into the one
+  // probing would open, never conjure shard 99999 and have it adopted.
+  const choseSub =
+    mayChooseSub && Number.isInteger(requestedSub) && requestedSub >= 0 && requestedSub <= shardCount;
+  const candidates = choseSub ? [requestedSub] : placementCandidates(placementKey, shardCount);
+  let lastResponse: Response | null = null;
 
-  const meta: ConnectMetadata = {
-    identity,
-    roomId,
-    shardIndex,
-    connectionId,
-    connectedAt: Date.now(),
-  };
+  for (const shardIndex of candidates) {
+    const meta: ConnectMetadata = {
+      identity,
+      roomId,
+      shardIndex,
+      connectionId,
+      connectedAt: Date.now(),
+    };
+    const stub = env.CHAT_SHARD.get(env.CHAT_SHARD.idFromName(shardName(roomId, shardIndex)));
+    const forwarded = new Request(req.url, req);
+    forwarded.headers.set(CONNECT_METADATA_HEADER, encodeConnectMetadata(meta));
+    const response = await stub.fetch(forwarded);
+    if (response.status !== 503) return response;
+    lastResponse = response;
+  }
 
-  const stub = env.CHAT_SHARD.get(env.CHAT_SHARD.idFromName(shardName(roomId, shardIndex)));
-  const forwarded = new Request(req.url, req);
-  forwarded.headers.set(CONNECT_METADATA_HEADER, encodeConnectMetadata(meta));
-  return stub.fetch(forwarded);
+  return lastResponse ?? problem(503, "shard_full", "all shard placement candidates are full");
 }
 
 const routes: RouteDef[] = [

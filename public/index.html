@@ -214,7 +214,7 @@
               <table class="grid-table">
                 <thead>
                   <tr>
-                    <th scope="col">Shard</th>
+                    <th scope="col" id="shards-column-title">Shard</th>
                     <th scope="col">Conex.</th>
                     <th scope="col">Aceitas</th>
                     <th scope="col">Rejeit.</th>
@@ -395,6 +395,10 @@
           <label class="field">
             <span>Modo lento (segundos)</span>
             <input id="slowmode-input" type="number" min="0" max="600" step="1" value="0" />
+          </label>
+          <label class="field">
+            <span>Sub-sala</span>
+            <input id="subroom-input" type="number" min="0" step="1" value="0" />
           </label>
           <label class="check">
             <input id="closed-input" type="checkbox" />

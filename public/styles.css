@@ -656,6 +656,17 @@ body {
   color: var(--text);
 }
 
+.msg__wide {
+  margin-right: 0.35rem;
+  border-radius: 999px;
+  padding: 0.08rem 0.38rem;
+  color: var(--brand);
+  background: var(--panel-3);
+  font-size: 0.68rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .mention {
   padding: 0 2px;
   border-radius: 3px;
