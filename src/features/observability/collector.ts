@@ -16,6 +16,7 @@ import { fnv1a32 } from "../../shared/hash";
 import { coordinatorName, shardName } from "../../shared/ids";
 import { createLogger, type LogLevel } from "../../shared/logger";
 import type { RoomStats } from "../../shared/ports";
+import type { FanoutConfig } from "../../shared/room-config";
 import {
   decodeAuditCursor,
   encodeAuditCursor,
@@ -45,6 +46,7 @@ export interface ShardView extends ShardHealthInput {
 
 export interface RoomSnapshot {
   roomId: string;
+  scope: FanoutConfig["scope"];
   now: number;
   /** Null when the coordinator itself could not be reached. */
   stats: RoomStats | null;
@@ -107,11 +109,13 @@ export async function collectRoom(
   const cursors = decodeAuditCursor(options.since);
 
   let stats: RoomStats | null = null;
+  let scope: FanoutConfig["scope"] = "room";
   try {
     const coordinator = env.ROOM_COORDINATOR.get(
       env.ROOM_COORDINATOR.idFromName(coordinatorName(roomId)),
     );
-    await coordinator.init(roomId);
+    const config = await coordinator.init(roomId);
+    scope = config.fanout.scope;
     stats = await coordinator.getStats();
   } catch (error) {
     // A console that throws when the room is broken is useless exactly when it
@@ -189,6 +193,7 @@ export async function collectRoom(
 
   return {
     roomId,
+    scope,
     now,
     stats,
     shards,

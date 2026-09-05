@@ -34,6 +34,12 @@ const routes: RouteDef[] = [
       if (!moderator) return problem(403, "forbidden", "moderator credentials required");
       const patch = await readJson<RoomConfigPatch>(req);
       if (!patch) return problem(400, "malformed", "invalid JSON body");
+      if (
+        patch.maxSocketsPerShard !== undefined &&
+        (!Number.isInteger(patch.maxSocketsPerShard) || patch.maxSocketsPerShard < 1)
+      ) {
+        return problem(400, "malformed", "maxSocketsPerShard must be an integer of at least 1");
+      }
       const roomId = params.roomId!;
       const stub = coordinatorStub(env, roomId);
       await stub.init(roomId);
