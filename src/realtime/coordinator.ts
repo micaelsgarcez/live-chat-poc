@@ -43,7 +43,7 @@ import {
   SHARD_HEARTBEAT_TTL_MS,
   type ShardRecord,
 } from "./coordinator/registry";
-import { planShardCount } from "./coordinator/scale";
+import { MAX_SHARD_COUNT, planShardCount } from "./coordinator/scale";
 
 const KEY_CONFIG = "config";
 const KEY_SHARDS = "shards";
@@ -169,10 +169,25 @@ export class RoomCoordinator extends DurableObject<Env> implements CoordinatorAp
   }
 
   async registerShard(roomId: string, shardIndex: number): Promise<RoomConfig> {
-    const config = await this.load(roomId);
+    let config = await this.load(roomId);
     // Registering is also how a shard we isolated earns its way back in.
     this.registry.register(shardIndex, Date.now());
     await this.persistShards();
+    if (shardIndex >= config.shardCount) {
+      const adoptedCount = Math.min(shardIndex + 1, MAX_SHARD_COUNT);
+      if (adoptedCount > config.shardCount) {
+        this.log.info("adopting shard opened by edge probing", {
+          roomId,
+          shard: shardIndex,
+          from: config.shardCount,
+          to: adoptedCount,
+        });
+        config = await this.applyConfigChange(
+          mergeRoomConfig(config, { shardCount: adoptedCount }),
+          config.shardCount,
+        );
+      }
+    }
     await this.ensureAlarm();
     return config;
   }
