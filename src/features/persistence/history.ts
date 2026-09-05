@@ -110,18 +110,24 @@ export async function listRoomMessages(
   roomId: string,
   limit: number,
   cursor: HistoryCursor | null,
+  options: { shardIndex?: number } = {},
 ): Promise<HistoryPage> {
   // Soft-deleted rows stay in D1 for moderation audits but must never be read
   // back — a retroactive delete has to hold on reload too.
-  const where = cursor
-    ? "m.room_id = ? AND m.deleted_at IS NULL AND (m.ts < ? OR (m.ts = ? AND m.id < ?))"
-    : "m.room_id = ? AND m.deleted_at IS NULL";
-  const bindings: Array<string | number> = cursor
-    ? [roomId, cursor.ts, cursor.ts, cursor.id, limit]
-    : [roomId, limit];
+  const conditions = ["m.room_id = ?", "m.deleted_at IS NULL"];
+  const bindings: Array<string | number> = [roomId];
+  if (options.shardIndex !== undefined) {
+    conditions.push("m.shard_index = ?");
+    bindings.push(options.shardIndex);
+  }
+  if (cursor) {
+    conditions.push("(m.ts < ? OR (m.ts = ? AND m.id < ?))");
+    bindings.push(cursor.ts, cursor.ts, cursor.id);
+  }
+  bindings.push(limit);
 
   const { results } = await env.CHAT_DB.prepare(
-    `SELECT ${SELECT_COLUMNS} ${FROM_WITH_PARENT} WHERE ${where} ORDER BY m.ts DESC, m.id DESC LIMIT ?`,
+    `SELECT ${SELECT_COLUMNS} ${FROM_WITH_PARENT} WHERE ${conditions.join(" AND ")} ORDER BY m.ts DESC, m.id DESC LIMIT ?`,
   )
     .bind(...bindings)
     .all<MessageRow>();

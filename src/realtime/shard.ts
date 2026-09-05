@@ -124,6 +124,8 @@ const RATE_WINDOW_MS = 10_000;
 const MAX_PERSISTED_USERS = 5_000;
 /** Give up on handing the slot back rather than keep an empty shard awake. */
 const MAX_UNREGISTER_ATTEMPTS = 5;
+/** A wedged local window loses old chat instead of exhausting isolate memory. */
+const MAX_PENDING_LOCAL = 5_000;
 
 export class ChatShard extends DurableObject<Env> implements ShardApi {
   private config: RoomConfig | null = null;
@@ -140,6 +142,8 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
   private readonly socketState = new WeakMap<WebSocket, { budget: ViewerBudget; userId: string }>();
   /** Chat messages this shard withheld from a viewer over its budget. */
   private sampledOut = 0;
+  private pendingLocal: ServerEvent[] = [];
+  private localFlushScheduled = false;
   private roomId = "";
   private shardIndex = 0;
   private buffer: MessageBuffer | null = null;
@@ -391,12 +395,17 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
       roles: meta.identity.roles.length ? meta.identity.roles : undefined,
     };
     // Resolved from what this shard saw, never from what the client claimed.
-    const replyTo = await this.resolveReply(meta.roomId, parsed.replyTo);
+    const replyTo = await this.resolveReply(meta.roomId, meta.shardIndex, config, parsed.replyTo);
     if (replyTo) message.replyTo = replyTo;
+
+    const local = !shadowed && config.fanout.scope === "subroom" && !ctx.privileged;
+    if (!shadowed && ctx.privileged && config.fanout.scope === "subroom") {
+      message.roomWide = true;
+    }
 
     // Shadowed messages are accepted for the sender and go no further: no
     // broadcast, no persistence, no moderation job.
-    if (!shadowed) {
+    if (!shadowed && !local) {
       try {
         await this.coordinator().publish({ message, originShardIndex: meta.shardIndex });
       } catch (error) {
@@ -419,6 +428,7 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
     this.markUserDirty(meta.identity.userId, now);
     this.send(ws, { t: "ack", cid: parsed.cid, id: message.id, ts: now });
     if (shadowed) return;
+    if (local) await this.deliverLocal([{ t: "msg", m: message }], config);
 
     this.bufferMessage(config, message, now);
 
@@ -491,9 +501,11 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
     }
 
     try {
-      await this.coordinator().broadcast([
+      const events: ServerEvent[] = [
         { t: "reaction", messageId: parsed.messageId, emoji: parsed.emoji, count: 1 },
-      ]);
+      ];
+      if (config.fanout.scope === "subroom") await this.fanout(events);
+      else await this.coordinator().broadcast(events);
     } catch (error) {
       this.log.error("reaction broadcast failed", { error: String(error) });
       this.rejectFrame(ws, parsed.cid, RejectCode.INTERNAL, "could not deliver the reaction", undefined, {
@@ -517,19 +529,72 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
    * memory; after an eviction it is rebuilt from stored history once, so a
    * quote does not silently disappear just because the isolate restarted.
    */
-  private async resolveReply(roomId: string, parentId: string | undefined) {
+  private async resolveReply(
+    roomId: string,
+    shardIndex: number,
+    config: RoomConfig,
+    parentId: string | undefined,
+  ) {
     if (!parentId) return undefined;
     const known = this.recent.resolve(parentId);
     if (known || this.recent.hydrated) return known;
     await this.recent.hydrate(async () => {
-      const page = await listRoomMessages(this.env, roomId, RECENT_MESSAGE_WINDOW, null);
+      const options = config.fanout.scope === "subroom" ? { shardIndex } : undefined;
+      const page = await listRoomMessages(
+        this.env,
+        roomId,
+        RECENT_MESSAGE_WINDOW,
+        null,
+        options,
+      );
       return page.messages;
     });
     return this.recent.resolve(parentId);
   }
 
+  private async deliverLocal(events: ServerEvent[], config: RoomConfig): Promise<void> {
+    const windowMs = config.fanout.batchWindowMs;
+    if (windowMs === 0) {
+      await this.fanout(events);
+      return;
+    }
+    for (const event of events) {
+      if (this.pendingLocal.length >= MAX_PENDING_LOCAL) {
+        this.pendingLocal.shift();
+        this.log.warn("local coalescing window overflowed, dropping oldest", {
+          room: this.roomId,
+          shard: this.shardIndex,
+        });
+      }
+      this.pendingLocal.push(event);
+    }
+    if (this.localFlushScheduled) return;
+    this.localFlushScheduled = true;
+    this.ctx.waitUntil(
+      new Promise<void>((resolve) => setTimeout(resolve, windowMs)).then(() =>
+        this.flushLocal().catch((error: unknown) =>
+          this.log.error("local coalesced fanout failed", { error: String(error) }),
+        ),
+      ),
+    );
+  }
+
+  private async flushLocal(): Promise<void> {
+    this.localFlushScheduled = false;
+    const batch = this.pendingLocal;
+    this.pendingLocal = [];
+    if (batch.length > 0) await this.fanout(batch);
+  }
+
   async fanout(events: ServerEvent[]): Promise<number> {
+    if (this.pendingLocal.length > 0) {
+      const pending = this.pendingLocal;
+      this.pendingLocal = [];
+      events = [...pending, ...events];
+    }
     if (events.length === 0) return 0;
+    const sub = this.ctx.getWebSockets().length;
+    events = events.map((event) => (event.t === "presence" ? { ...event, sub } : event));
     for (const event of events) {
       if (event.t === "msg") this.recent.remember(event.m);
       else if (event.t === "delete") {
@@ -549,7 +614,7 @@ export class ChatShard extends DurableObject<Env> implements ShardApi {
 
     let plan: DeliveryPlan;
     try {
-      plan = planDelivery(events);
+      plan = planDelivery(events, { privilegedRoles: this.config?.privilegedRoles });
     } catch (error) {
       this.log.error("unencodable event", { error: String(error) });
       return 0;
