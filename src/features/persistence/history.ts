@@ -163,7 +163,12 @@ export const historyRoutes: readonly RouteDef[] = [
       const cursor = await resolveHistoryCursor(env, roomId, url.searchParams.get("before"));
       if (!cursor.ok) return problem(400, "malformed", cursor.error);
       const limit = parseHistoryLimit(url.searchParams.get("limit"));
-      return json(await listRoomMessages(env, roomId, limit, cursor.value));
+      const rawSub = url.searchParams.get("sub");
+      const shardIndex = rawSub === null ? undefined : Number(rawSub);
+      if (shardIndex !== undefined && (!Number.isInteger(shardIndex) || shardIndex < 0)) {
+        return problem(400, "malformed", `unusable "sub" filter: ${rawSub}`);
+      }
+      return json(await listRoomMessages(env, roomId, limit, cursor.value, { shardIndex }));
     },
   },
   {

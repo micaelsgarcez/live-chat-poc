@@ -16,13 +16,18 @@ interface HistoryResponse {
 /** Seeds `count` messages one millisecond apart, oldest first. */
 async function seed(
   count: number,
-  options: { roomId?: string; deletedEvery?: number; startIndex?: number } = {},
+  options: {
+    roomId?: string;
+    deletedEvery?: number;
+    startIndex?: number;
+    shardIndex?: number;
+  } = {},
 ): Promise<void> {
   const roomId = options.roomId ?? ROOM;
   const start = options.startIndex ?? 0;
   const insert = env.CHAT_DB.prepare(
     `INSERT OR REPLACE INTO messages (id, room_id, user_id, name, body, ts, shard_index, masked, deleted_at)
-     VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const statements = Array.from({ length: count }, (_, offset) => {
     const i = start + offset;
@@ -34,6 +39,7 @@ async function seed(
       `User ${i % 3}`,
       `body ${i}`,
       T0 + i,
+      options.shardIndex ?? 0,
       i % 5 === 0 ? 1 : 0,
       deleted ? T0 + 10_000 : null,
     );
@@ -139,6 +145,17 @@ describe("history routes", () => {
       "m0101",
       "m0100",
     ]);
+  });
+
+  it("filters history by subroom when requested", async () => {
+    await seed(3, { shardIndex: 0 });
+    await seed(2, { shardIndex: 1, startIndex: 100 });
+
+    expect((await history("?sub=1")).messages.map((m) => m.id)).toEqual(["m0101", "m0100"]);
+    expect((await history()).messages).toHaveLength(5);
+
+    const invalid = await SELF.fetch(`https://example.com/api/rooms/${ROOM}/messages?sub=-1`);
+    expect(invalid.status).toBe(400);
   });
 
   it("fetches a single message and 404s on unknown or deleted ones", async () => {
