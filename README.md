@@ -149,10 +149,6 @@ mostra o total da live e quantas pessoas estão na sub-sala; papéis privilegiad
 podem escolher uma com `?sub=N`. O histórico aceita o mesmo filtro, enquanto a
 consulta sem `sub` preserva a visão global de moderação.
 
-Ainda não há fusão de sub-salas quando a live esvazia nem colocação de amigos na
-mesma sub-sala. Reduzir o conjunto ao vivo remapearia usuários e perderia o
-estado quente dos gates; afinidade social é uma decisão de produto separada.
-
 ## Endpoints
 
 | Método | Rota | O quê |
