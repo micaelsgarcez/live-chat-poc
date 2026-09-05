@@ -43,6 +43,12 @@ dividida:
 **É isso que faz o "outgoing messages são de graça" valer a pena:** cada shard paga
 por 1 mensagem que entra, não por quantos clientes recebem.
 
+Salas muito grandes podem ativar `fanout.scope: "subroom"`. Nesse modo cada
+`ChatShard` é também uma sub-sala e entrega localmente mensagens comuns, tirando
+o `RoomCoordinator` do caminho quente. Só o que pertence à sala inteira —
+mensagens privilegiadas, delete, ban, configuração e presença total — continua
+passando pelo coordinator e chegando a todos os shards.
+
 - **RoomCoordinator** — cérebro da sala. Dono da `RoomConfig` autoritativa, do
   registro de shards ativos, do fanout, da propagação de ban e de delete
   retroativo. Nunca segura socket de cliente.

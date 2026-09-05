@@ -275,14 +275,15 @@ Não rodamos. Este é o procedimento para quem quiser.
 
 ### 5.2 Antes do run
 
-**Provisione os shards.** O run oficial fixa `shardCount` antes de começar; se
-deixar autoescalar, o denominador do `hash(sala:usuário) % shardCount` muda no
-meio da rampa e a colocação re-hasheia, perdendo o estado quente dos gates.
+**Ative sub-salas e comece com uma.** A sonda da borda abre a próxima quando as
+existentes atingem `maxSocketsPerShard`; o coordinator adota o índice e publica
+o novo `shardCount`. Conexões existentes não são movidas, e a distribuição que
+o gerador lê do `hello` mostra se o crescimento aconteceu como esperado.
 
 ```bash
 curl -X PATCH https://<seu-worker>/api/rooms/loadtest/config \
   -H "x-moderator-key: $MODERATOR_API_KEY" -H 'content-type: application/json' \
-  -d '{"shardCount":60,"fanout":{"batchWindowMs":100,"maxPerViewerPerSecond":20,"alwaysDeliverOwn":true}}'
+  -d '{"shardCount":1,"maxSocketsPerShard":2000,"fanout":{"scope":"subroom","batchWindowMs":100,"maxPerViewerPerSecond":20,"alwaysDeliverOwn":true}}'
 ```
 
 **Arme o bypass do limite de conexões — e só então.** 30 máquinas abrindo 300 mil

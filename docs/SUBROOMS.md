@@ -1,6 +1,6 @@
 # Sub-salas automáticas
 
-> Estado: **plano aprovado para implementação**. Este documento tem três
+> Estado: **implementado** em `3ad0519`. Este documento tem três
 > partes, e elas não devem ser confundidas: o que foi **pesquisado** (§1–§2),
 > o que foi **decidido** e por quê (§3, no formato de grill: pergunta →
 > resposta adotada), e o que deve ser **construído** (§4, o plano que o
