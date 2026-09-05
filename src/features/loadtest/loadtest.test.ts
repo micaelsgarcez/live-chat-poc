@@ -45,7 +45,15 @@ describe("presets", () => {
 
   it("provisions enough shards for the sockets it plans to open", () => {
     for (const preset of LOADTEST_PRESETS) {
-      expect(preset.shards * 5_000).toBeGreaterThanOrEqual(preset.connections);
+      expect(preset.shards * preset.maxSocketsPerShard).toBeGreaterThanOrEqual(preset.connections);
+    }
+  });
+
+  it("lets medium and larger runs grow subrooms automatically", () => {
+    for (const preset of LOADTEST_PRESETS.slice(2)) {
+      expect(preset.fanout.scope).toBe("subroom");
+      expect(preset.shardCount).toBe(1);
+      expect(preset.maxSocketsPerShard).toBe(2_000);
     }
   });
 });

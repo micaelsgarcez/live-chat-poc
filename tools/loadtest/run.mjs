@@ -39,12 +39,12 @@ import { messageFor, nameFor } from "./voice.mjs";
  * run work with nothing deployed.
  */
 const FALLBACK_PRESETS = [
-  { name: "smoke", connections: 1_000, talkers: 200, shards: 1, machines: 1, rampSeconds: 60, holdSeconds: 30 },
-  { name: "small", connections: 10_000, talkers: 2_000, shards: 2, machines: 1, rampSeconds: 60, holdSeconds: 30 },
-  { name: "medium", connections: 50_000, talkers: 10_000, shards: 10, machines: 5, rampSeconds: 60, holdSeconds: 30 },
-  { name: "large", connections: 100_000, talkers: 20_000, shards: 20, machines: 10, rampSeconds: 60, holdSeconds: 30 },
-  { name: "xlarge", connections: 200_000, talkers: 35_000, shards: 40, machines: 20, rampSeconds: 60, holdSeconds: 30 },
-  { name: "max", connections: 300_000, talkers: 50_000, shards: 60, machines: 30, rampSeconds: 60, holdSeconds: 30 },
+  { name: "smoke", connections: 1_000, talkers: 200, shards: 1, shardCount: 1, maxSocketsPerShard: 5_000, fanout: { scope: "room" }, machines: 1, rampSeconds: 60, holdSeconds: 30 },
+  { name: "small", connections: 10_000, talkers: 2_000, shards: 2, shardCount: 2, maxSocketsPerShard: 5_000, fanout: { scope: "room" }, machines: 1, rampSeconds: 60, holdSeconds: 30 },
+  { name: "medium", connections: 50_000, talkers: 10_000, shards: 25, shardCount: 1, maxSocketsPerShard: 2_000, fanout: { scope: "subroom" }, machines: 5, rampSeconds: 60, holdSeconds: 30 },
+  { name: "large", connections: 100_000, talkers: 20_000, shards: 50, shardCount: 1, maxSocketsPerShard: 2_000, fanout: { scope: "subroom" }, machines: 10, rampSeconds: 60, holdSeconds: 30 },
+  { name: "xlarge", connections: 200_000, talkers: 35_000, shards: 100, shardCount: 1, maxSocketsPerShard: 2_000, fanout: { scope: "subroom" }, machines: 20, rampSeconds: 60, holdSeconds: 30 },
+  { name: "max", connections: 300_000, talkers: 50_000, shards: 150, shardCount: 1, maxSocketsPerShard: 2_000, fanout: { scope: "subroom" }, machines: 30, rampSeconds: 60, holdSeconds: 30 },
 ];
 
 const DEFAULTS = {
@@ -66,6 +66,8 @@ const DEFAULTS = {
   jwtSecret: "",
   moderatorKey: "",
   bypassKey: "",
+  scope: "room",
+  presetConfig: null,
   issuer: "https://auth.local.test",
   audience: "live-chat",
 };
@@ -93,6 +95,7 @@ const HELP = `live-chat load generator
 Target
   --url <url>          WebSocket origin                      (default ${DEFAULTS.url})
   --room <id>          room to join                          (default ${DEFAULTS.room})
+  --scope <mode>       room | subroom                        (default ${DEFAULTS.scope})
 
 Shape — pick a preset, or set the numbers yourself
   --preset <name>      ${FALLBACK_PRESETS.map((p) => p.name).join(" | ")}
@@ -159,6 +162,7 @@ const STRING = new Set([
   "bypasskey",
   "issuer",
   "audience",
+  "scope",
 ]);
 const CAMEL = {
   pertalkerrate: "perTalkerRate",
@@ -314,6 +318,7 @@ const metrics = {
   maxSocketsPerShard: 0,
   shardCount: 0,
   batchWindowMs: 0,
+  scope: "room",
   drainSeconds: null,
   presenceAfterDrain: null,
   timeline: [],
@@ -378,6 +383,7 @@ function spawnClient(index, options, context) {
     inflight: new Map(),
     /** message id -> whether it came back to us. Bounded; see MAX_TRACKED_OWN. */
     own: new Map(),
+    shardIndex: null,
   };
   clients.push(client);
 
@@ -462,6 +468,7 @@ function apply(client, msg, now) {
     }
     case "hello":
       metrics.helloReceived++;
+      if (Number.isInteger(msg.shardIndex) && msg.shardIndex >= 0) client.shardIndex = msg.shardIndex;
       if (typeof msg.config?.maxDeliveredPerSecond === "number") {
         metrics.viewerCap = msg.config.maxDeliveredPerSecond;
       }
@@ -633,6 +640,15 @@ async function announceRun(base, room, key, body) {
   });
 }
 
+async function configureRoomForRun(base, room, key, patch) {
+  if (!key) return null;
+  return fetchJson(`${base}/api/rooms/${encodeURIComponent(room)}/config`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", "x-moderator-key": key },
+    body: JSON.stringify(patch),
+  });
+}
+
 async function reportProgress(base, room, key, body) {
   if (!key) return;
   await fetchJson(`${base}/api/rooms/${encodeURIComponent(room)}/loadtest`, {
@@ -689,6 +705,12 @@ function buildReport(options, context, partial) {
   const elapsedMs = Math.max(1, Date.now() - metrics.startedAt);
   const seconds = elapsedMs / 1000;
   const connected = clients.filter((c) => c.open).length;
+  const occupancy = new Map();
+  for (const client of clients) {
+    if (client.shardIndex === null) continue;
+    occupancy.set(client.shardIndex, (occupancy.get(client.shardIndex) ?? 0) + 1);
+  }
+  const subroomSizes = [...occupancy.values()];
 
   const verdict = evaluate({
     opened: metrics.holdOpened || metrics.connectionsOpened,
@@ -711,6 +733,8 @@ function buildReport(options, context, partial) {
     shardCount: metrics.shardCount || 1,
     batchWindowMs: metrics.batchWindowMs,
     runSeconds: seconds,
+    scope: metrics.scope,
+    privilegedMessages: 0,
   });
 
   return {
@@ -734,6 +758,10 @@ function buildReport(options, context, partial) {
       batchWindowMs: metrics.batchWindowMs,
       maxDeliveredPerSecond: metrics.viewerCap ?? 0,
       busiestShard: metrics.maxShardSockets,
+      scope: metrics.scope,
+      subroomsOpened: occupancy.size,
+      smallestSubroom: subroomSizes.length ? Math.min(...subroomSizes) : 0,
+      largestSubroom: subroomSizes.length ? Math.max(...subroomSizes) : 0,
     },
     elapsedSeconds: Math.round(seconds * 100) / 100,
     connections: {
@@ -809,6 +837,9 @@ function printReport(report) {
   );
   p(
     `  ${pad("room", 18)} ${report.room.shardCount} shards, ceiling ${report.room.maxSocketsPerShard}/shard, batch window ${report.room.batchWindowMs}ms, viewer cap ${report.room.maxDeliveredPerSecond || "off"}`,
+  );
+  p(
+    `  ${pad("subrooms", 18)} ${report.room.subroomsOpened} opened, occupancy ${report.room.smallestSubroom}–${report.room.largestSubroom}, scope ${report.room.scope}`,
   );
   if (report.plan.bypass) p(`  ${pad("", 18)} ⚠ edge connection limit BYPASSED for this run`);
   p(`  ${pad("elapsed", 18)} ${report.elapsedSeconds}s`);
@@ -968,6 +999,14 @@ async function run(options, context) {
   bypassSigner = makeBypassSigner(context.bypassKey);
   loopDelay.enable();
 
+  if (options.announce && context.moderatorKey) {
+    const preset = options.presetConfig ?? {};
+    await configureRoomForRun(base, options.room, context.moderatorKey, {
+      ...preset,
+      fanout: { ...(preset.fanout ?? {}), scope: options.scope },
+    });
+  }
+
   // What the room is actually configured with. Reported alongside the result,
   // because a number obtained at one shard count says nothing at another.
   const config = await readRoomConfig(base, options.room);
@@ -975,6 +1014,7 @@ async function run(options, context) {
     metrics.shardCount = config.shardCount ?? 0;
     metrics.maxSocketsPerShard = config.maxSocketsPerShard ?? 0;
     metrics.batchWindowMs = config.fanout?.batchWindowMs ?? 0;
+    metrics.scope = config.fanout?.scope ?? options.scope;
   }
 
   context.usageBefore = await readAccountUsage({
@@ -990,6 +1030,7 @@ async function run(options, context) {
       talkers: options.talkers * options.nodes,
       rampSeconds: options.ramp,
       holdSeconds: options.duration,
+      scope: options.scope,
     });
   }
 
@@ -1097,6 +1138,11 @@ async function main() {
   const base = httpBase(options.url);
   const devVars = readDevVars();
 
+  if (options.scope !== "room" && options.scope !== "subroom") {
+    process.stderr.write(`--scope expects room or subroom, got "${options.scope}"\n`);
+    process.exit(2);
+  }
+
   const context = {
     jwtSecret: options.jwtSecret || process.env.JWT_HS256_SECRET || devVars.JWT_HS256_SECRET || "",
     moderatorKey:
@@ -1132,6 +1178,12 @@ async function main() {
     options.talkers = shareOf(preset.talkers, options.node, options.nodes);
     options.ramp = preset.rampSeconds;
     options.duration = preset.holdSeconds;
+    options.presetConfig = {
+      shardCount: preset.shardCount,
+      maxSocketsPerShard: preset.maxSocketsPerShard,
+      fanout: preset.fanout,
+    };
+    if (!options._explicit.has("scope")) options.scope = preset.fanout?.scope ?? "room";
   }
 
   // Only when the operator did not say otherwise: an explicit flag always wins,
