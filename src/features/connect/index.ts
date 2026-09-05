@@ -67,7 +67,10 @@ export async function handleConnect(
   // on connect. Dynamic privileged roles therefore cannot select a subroom;
   // moderator, admin and system can because they are privileged by default.
   const mayChooseSub = hasRole(identity, defaultRoomConfig(roomId).privilegedRoles);
-  const choseSub = mayChooseSub && Number.isInteger(requestedSub) && requestedSub >= 0;
+  // Bounded to the next subroom at most: a moderator may look into the one
+  // probing would open, never conjure shard 99999 and have it adopted.
+  const choseSub =
+    mayChooseSub && Number.isInteger(requestedSub) && requestedSub >= 0 && requestedSub <= shardCount;
   const candidates = choseSub ? [requestedSub] : placementCandidates(placementKey, shardCount);
   let lastResponse: Response | null = null;
 
