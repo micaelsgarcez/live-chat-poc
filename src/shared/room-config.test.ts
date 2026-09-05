@@ -17,6 +17,7 @@ describe("normalizeRoomConfig", () => {
   it("fills in a block a stored config predates", () => {
     const normalized = normalizeRoomConfig(legacyStoredConfig());
     expect(normalized.fanout).toEqual({
+      scope: "room",
       batchWindowMs: 0,
       maxPerViewerPerSecond: 0,
       alwaysDeliverOwn: true,

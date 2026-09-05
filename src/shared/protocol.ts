@@ -69,6 +69,8 @@ export interface ChatMessage {
   /** Set when a sync moderation gate rewrote the body instead of blocking it. */
   masked?: boolean;
   roles?: string[];
+  /** True when a privileged message crosses every subroom. */
+  roomWide?: true;
   /** Absent when the parent is older than what the shard still remembers. */
   replyTo?: ReplyRef;
 }
@@ -122,6 +124,8 @@ export interface ServerReaction {
 export interface ServerPresence {
   t: "presence";
   count: number;
+  /** Connections in the receiving socket's subroom. */
+  sub?: number;
 }
 
 export interface ServerConfig {
@@ -200,6 +204,7 @@ export interface PublicRoomConfig {
   slowModeMs: number;
   maxMessageLength: number;
   closed: boolean;
+  scope: "room" | "subroom";
   /**
    * Chat messages a single socket may receive per second; 0 means unlimited.
    * Public because a client that is being sampled must be able to show it.

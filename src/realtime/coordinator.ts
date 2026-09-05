@@ -97,6 +97,7 @@ function clampFanout(fanout: FanoutConfig): FanoutConfig {
   const window = Number.isFinite(fanout.batchWindowMs) ? fanout.batchWindowMs : 0;
   const cap = Number.isFinite(fanout.maxPerViewerPerSecond) ? fanout.maxPerViewerPerSecond : 0;
   return {
+    scope: fanout.scope === "subroom" ? "subroom" : "room",
     batchWindowMs: Math.min(MAX_BATCH_WINDOW_MS, Math.max(0, Math.floor(window))),
     maxPerViewerPerSecond: Math.max(0, Math.floor(cap)),
     alwaysDeliverOwn: fanout.alwaysDeliverOwn !== false,
@@ -300,11 +301,14 @@ export class RoomCoordinator extends DurableObject<Env> implements CoordinatorAp
 
   async getStats(): Promise<RoomStats> {
     const config = await this.load();
+    const registeredShards = this.registry.all();
+    const connections = this.registry.connections();
     return {
       roomId: config.roomId,
       shardCount: config.shardCount,
-      registeredShards: this.registry.all(),
-      connections: this.registry.connections(),
+      registeredShards,
+      connections,
+      averageSubRoomOccupancy: registeredShards.length > 0 ? connections / registeredShards.length : 0,
       messagesPublished: this.counters.messagesPublished,
       configVersion: config.version,
       updatedAt: Date.now(),

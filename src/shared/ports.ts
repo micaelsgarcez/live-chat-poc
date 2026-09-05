@@ -29,6 +29,7 @@ export interface RoomStats {
   shardCount: number;
   registeredShards: number[];
   connections: number;
+  averageSubRoomOccupancy: number;
   messagesPublished: number;
   configVersion: number;
   updatedAt: number;
